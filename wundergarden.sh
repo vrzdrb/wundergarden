@@ -230,7 +230,7 @@ preflight() {
     [[ -r /etc/os-release ]] || { echo "не найден /etc/os-release — поддерживаются Debian/Ubuntu" >&2; exit 1; }
     local os_id os_like
     os_id="$(. /etc/os-release && echo "$ID")"
-    os_like="$(. /etc/os-release && echo "$ID_LIKE")"
+    os_like="$(. /etc/os-release && echo "${ID_LIKE:-}")"
     case " $os_id $os_like " in
         *" debian "*|*" ubuntu "*) ;;
         *) echo "поддерживаются Debian/Ubuntu (обнаружен: $os_id)" >&2; exit 1 ;;

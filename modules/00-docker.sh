@@ -10,7 +10,7 @@ install_docker() {
     log "Устанавливаю Docker по официальной инструкции (download.docker.com)..."
     local os_id os_like
     os_id="$(. /etc/os-release && echo "$ID")"
-    os_like="$(. /etc/os-release && echo "$ID_LIKE")"
+    os_like="$(. /etc/os-release && echo "${ID_LIKE:-}")"
     local distro="debian"
     if [[ "$os_id" == "ubuntu" || " $os_like " == *" ubuntu "* || " $os_like " == *" debian "* && "$os_id" != "debian" ]]; then
         distro="$os_id"
