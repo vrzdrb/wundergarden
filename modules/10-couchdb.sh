@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# modules/10-couchdb.sh — сервис: couchdb
+# Загружается wundergarden.sh; использует общие хелперы основного скрипта.
+
+install_couchdb() {
+    ensure_prepared
+    log "=== CouchDB (Obsidian LiveSync) ==="
+    local fresh="true" new_pass=""
+    if [[ -d "$DATA_DIR/couchdb" && -n "$(ls -A "$DATA_DIR/couchdb" 2>/dev/null)" ]]; then fresh="false"; fi
+    local dbname="obsidian" maxdoc=50 maxreq=4096 cors_extra=""
+
+    SUB_OBSIDIAN="$(ask "Поддомен для Obsidian (LiveSync)" "${SUB_OBSIDIAN:-obsidian.$DOMAIN}")"
+    update_env SUB_OBSIDIAN "$SUB_OBSIDIAN"; dns_hint "$SUB_OBSIDIAN"
+
+    while true; do
+        local pass_descr="в .env (COUCHDB_PASSWORD)"
+        [[ "$fresh" == "true" ]] && pass_descr="будет сгенерирован (или задайте в пункте 2)"
+        cat <<SUM
+
+ --- Настройки CouchDB ---
+  1. Поддомен: https://$SUB_OBSIDIAN
+  2. Учётка: $COUCHDB_USER / $pass_descr
+  3. База заметок: $dbname
+  4. Лимиты: документ ${maxdoc} МБ | HTTP-запрос ${maxreq} МБ
+  5. Доп. CORS-origins: ${cors_extra:-—}
+
+SUM
+        read -rp "$(_t PROMPT_SETTINGS)" c || true
+        case "$c" in
+            1)
+                SUB_OBSIDIAN="$(ask "Поддомен" "$SUB_OBSIDIAN")"
+                update_env SUB_OBSIDIAN "$SUB_OBSIDIAN"; dns_hint "$SUB_OBSIDIAN" ;;
+            2)
+                local u p
+                u="$(ask "Логин CouchDB" "$COUCHDB_USER")"
+                if [[ "$u" != "$COUCHDB_USER" && "$fresh" == "false" ]]; then
+                    warn "на существующей установке логин не меняется (админ уже создан) — оставляю $COUCHDB_USER"
+                else
+                    COUCHDB_USER="$u"; update_env COUCHDB_USER "$u"
+                fi
+                p="$(ask "Пароль (Enter — сгенерировать/не менять)" "$([[ "$fresh" == "true" ]] && gen_pass)")"
+                [[ -n "$p" ]] && new_pass="$p" ;;
+            3)
+                dbname="$(ask "Имя базы (a-z0-9 и _ $ ( ) + -)" "$dbname")"
+                [[ "$dbname" =~ ^[a-z0-9][a-z0-9_$()+-]*$ ]] || { warn "недопустимое имя базы '$dbname'"; dbname="obsidian"; } ;;
+            4)
+                local md mr
+                md="$(ask "Макс. размер документа, МБ (число)" "$maxdoc")"
+                mr="$(ask "Макс. размер HTTP-запроса, МБ (число)" "$maxreq")"
+                [[ "$md" =~ ^[0-9]+$ ]] && maxdoc="$md" || warn "нужно число — оставляю $maxdoc"
+                [[ "$mr" =~ ^[0-9]+$ ]] && maxreq="$mr" || warn "нужно число — оставляю $maxreq" ;;
+            5) cors_extra="$(ask "Доп. origins через запятую (напр. http://localhost:8080); пусто — без" "$cors_extra")"
+               cors_extra="${cors_extra// /}" ;;
+            L|l|Д|д) logs_menu couchdb ;;
+            "") break ;;
+            *) warn "нет такого пункта" ;;
+        esac
+    done
+
+    # на свежей установке пароль подкладываем в env ДО первого старта
+    if [[ "$fresh" == "true" && -n "$new_pass" ]]; then
+        COUCHDB_PASSWORD="$new_pass"; update_env COUCHDB_PASSWORD "$new_pass"
+    fi
+
+    mkdir -p "$CONFIG_ROOT/config/couchdb"
+    cat > "$CONFIG_ROOT/config/couchdb/10-livesync.ini" <<EOF
+[couchdb]
+single_node = true
+max_document_size = $((maxdoc*1048576))
+[chttpd]
+max_http_request_size = $((maxreq*1048576))
+require_valid_user = true
+[httpd]
+enable_cors = true
+[cors]
+origins = app://obsidian.md,capacitor://localhost,http://localhost${cors_extra:+,$cors_extra}
+methods = GET, PUT, POST, HEAD, DELETE
+credentials = true
+headers = accept, authorization, content-type, origin, referer
+max_age = 3600
+EOF
+
+    docker compose up -d couchdb
+    log "Жду healthcheck CouchDB..."
+    local status=""
+    for _ in $(seq 1 45); do
+        status=$(docker inspect --format '{{.State.Health.Status}}' homeserver-couchdb-1 2>/dev/null || echo starting)
+        [[ "$status" == "healthy" ]] && break; sleep 2
+    done
+    [[ "$status" == "healthy" ]] || die "CouchDB не поднялся: docker compose logs couchdb"
+
+    for db in _users _replicator "$dbname"; do
+        code=$(docker compose exec -T couchdb curl -s -o /dev/null -w '%{http_code}' \
+            -X PUT -u "$COUCHDB_USER:$COUCHDB_PASSWORD" "http://localhost:5984/$db")
+        [[ "$code" =~ ^(201|412)$ ]] && log "  база $db — ок" || warn "  база $db — HTTP $code"
+    done
+
+    # смена пароля на работающем сервере (env применяется только при первом старте)
+    if [[ "$fresh" == "false" && -n "$new_pass" ]]; then
+        code=$(docker compose exec -T couchdb curl -s -o /dev/null -w '%{http_code}' -X PUT \
+            -u "$COUCHDB_USER:$COUCHDB_PASSWORD" \
+            "http://localhost:5984/_node/_local/_config/admins/$COUCHDB_USER" -d "\"$new_pass\"")
+        [[ "$code" == "200" ]] && { update_env COUCHDB_PASSWORD "$new_pass"; log "Пароль CouchDB обновлён."; } \
+                               || warn "смена пароля не удалась (HTTP $code) — смените через Fauxton (_utils)."
+    fi
+
+    add_site 10-obsidian "server {
+    listen 8443 ssl;
+    server_name $SUB_OBSIDIAN;
+    ssl_certificate     /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    client_max_body_size 4096m;
+    location / {
+        proxy_pass http://couchdb:5984;
+        include /etc/nginx/proxy_common.conf;
+    }
+}"
+    cat <<EOF
+
+ Готово: https://$SUB_OBSIDIAN
+ В плагине Self-hosted LiveSync на каждом устройстве:
+   URL: https://$SUB_OBSIDIAN | база: $dbname | логин: $COUCHDB_USER | пароль: см. .env
+   E2E-пароль задайте свой, одинаковый на всех устройствах.
+ Веб-админка Fauxton: https://$SUB_OBSIDIAN/_utils (те же учётные данные).
+EOF
+}
