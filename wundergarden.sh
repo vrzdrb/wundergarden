@@ -74,7 +74,7 @@ _t() { # _t KEY — строка интерфейса по LANG_UI (fallback: ru
             M20) echo "Netdata (monitoring: network, containers, DBs, nginx)" ;;
             M21) echo "Gitea (self-hosted Git behind nginx)" ;;
             M22) echo "Jitsi Meet (video conferencing)" ;;
-            MQ)   echo "  q. Exit" ;;
+            MQ)   echo "  ${c_num}0.${c_off} ${c_txt}Exit${c_off}" ;;
             MFTR) echo "-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-" ;;
             PROMPT_SETTINGS) echo "Item number (L — container logs, Enter — apply): " ;;
             PROMPT_BACK)     echo "Item number (Enter — back): " ;;
@@ -128,7 +128,7 @@ _t() { # _t KEY — строка интерфейса по LANG_UI (fallback: ru
         M20) echo "Netdata — мониторинг (сеть, контейнеры, БД, nginx)" ;;
         M21) echo "Gitea — свой Git-хостинг за nginx" ;;
         M22) echo "Jitsi Meet (видеоконференции)" ;;
-        MQ)   echo "  q. Выход" ;;
+        MQ)   echo "  ${c_num}0.${c_off} ${c_txt}Выход${c_off}" ;;
         MFTR) echo "-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-" ;;
         PROMPT_SETTINGS) echo "Номер пункта (L — логи контейнеров, Enter — установить): " ;;
         PROMPT_BACK)     echo "Номер пункта (Enter — назад): " ;;
@@ -507,30 +507,19 @@ tz_setup() {
 }
 
 user_setup() {
-    local u; u="$(ask "Имя пользователя (a-z, цифры, _; пусто — отмена)")"
+    echo "${c_txt}Создание нового пользователя...${c_off}"
+    local u; u="$(ask "Имя пользователя")"
     [[ -z "$u" ]] && return 0
-    [[ "$u" =~ ^[a-z_][a-z0-9_-]*$ ]] || { warn "некорректное имя"; return 1; }
-    if id "$u" >/dev/null 2>&1; then warn "пользователь '$u' уже существует"; return 1; fi
-    useradd -m -s /bin/bash "$u" && usermod -aG sudo "$u"
-    if ask_yn "Задать пароль (Enter — нет, вход только по SSH-ключу)?"; then
-        passwd "$u"
+    if id "$u" >/dev/null 2>&1; then
+        warn "Пользователь $u уже существует!"
     else
-        passwd -l "$u" >/dev/null 2>&1 || true
-        local ip; ip="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || echo '<IP сервера>')"
-        cat <<EOF
-${c_mag}=== SSH-ключ для входа $u@$ip ===${c_off}
-${c_txt}1. На своём компьютере создайте ключ (Enter на все вопросы):${c_off}
-   ${c_txt}ssh-keygen -t ed25519${c_off}
-${c_txt}2. Загрузите его на сервер:${c_off}
-   ${c_txt}Linux/macOS:  ssh-copy-id -i ~/.ssh/id_ed25519.pub $u@$ip${c_off}
-   ${c_txt}Windows (PowerShell):${c_off}
-   ${c_txt}type \$env:USERPROFILE\.ssh\id_ed25519.pub | ssh $u@$ip "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"${c_off}
-${c_txt}3. Проверьте вход по ключу:${c_off}
-   ${c_txt}ssh $u@$ip${c_off}
-${c_dim}4. Только после успешного входа — отключите парольный вход: п.5 «SSH-hardening» (там же смена порта).${c_off}
-EOF
+        useradd -m -s /bin/bash "$u"
+        passwd "$u"
+        usermod -aG sudo "$u"
+        log "Пользователь $u создан и добавлен в группу sudo"
+        echo "${c_dim}SSH-ключ и отключение пароля — п.5 «SSH-hardening».${c_off}"
     fi
-    id "$u"
+    read -rp "Enter — назад " _ || true
 }
 
 sudo_logging_toggle() {
@@ -590,39 +579,120 @@ sudo_log_view() {
     read -rp "Enter — назад " _ || true
 }
 ssh_harden() {
-    log "=== SSH-hardening ==="
-    warn "Не закрывайте текущую сессию! После применения проверьте вход в НОВОМ окне."
-    local port pwauth
-    port="$(ask "Порт SSH (Enter — не менять)" "")"
-    [[ -n "$port" && ! "$port" =~ ^[0-9]{1,5}$ ]] && { warn "нужно число — порт не меняю"; port=""; }
-    echo "${c_txt}PasswordAuthentication no — только ключи. Убедитесь, что ключ уже работает!${c_off}"
-    ask_yn "Отключить вход по паролю?" && pwauth="no" || pwauth="yes"
-    # cloud-init форсирует PasswordAuthentication yes — отключаем его drop-in
+    echo "${c_txt}Настройка SSH...${c_off}"
+    local username; username="$(ask "Имя созданного пользователя (НЕ ROOT)")"
+    [[ -z "$username" ]] && { warn "имя обязательно"; return 1; }
+    id "$username" >/dev/null 2>&1 || warn "пользователь '$username' не найден — проверьте имя"
+
+    local port; port="$(ask "Новый SSH-порт" "22")"
+    [[ "$port" =~ ^[0-9]+$ && "$port" -ge 1 && "$port" -le 65535 ]] || die "некорректный порт: '$port'"
+
+    local IP; IP="$(curl -fsS --max-time 5 ifconfig.me 2>/dev/null || echo '<IP сервера>')"
+
+    # подсказки по SSH-ключу (vps_autosetup, дословно)
+    echo "${c_mag}=======================================================================================${c_off}"
+    echo "${c_mag}ВНИМАТЕЛЬНО ПРОЧТИТЕ: сейчас вам нужно открыть терминал на своём компьютере${c_off}"
+    echo "${c_mag}И создать ssh-ключ для входа на сервер следующей командой:${c_off}"
+    echo "${c_txt}ssh-keygen -t ed25519${c_off}"
+    echo ""
+    echo "${c_mag}Загрузите ключ на сервер (команда для Linux):${c_off}"
+    echo "${c_txt}ssh-copy-id -i имяключа.pub $username@$IP${c_off}"
+    echo ""
+    echo "${c_mag}Команда для Windows:${c_off}"
+    echo "${c_txt}cat id_ed25519.pub | ssh $username@$IP mkdir -p && cat >> ~/.ssh/authorized_keys${c_off}"
+    echo ""
+    echo "${c_mag}Попробуйте подключиться к вашему серверу при помощи этого ключа:${c_off}"
+    echo "${c_txt}ssh -i имяключа $username@$IP${c_off}"
+    echo ""
+    echo "${c_mag}ТОЛЬКО ЕСЛИ ВХОД УСПЕШЕН, нажмите здесь Enter для ОТКЛЮЧЕНИЯ ВХОДА В SSH ПО ПАРОЛЮ${c_off}"
+    echo "${c_mag}=======================================================================================${c_off}"
+    read -r
+
+    local SSHD_CONFIG="/etc/ssh/sshd_config"
+    [[ -f "$SSHD_CONFIG" ]] || die "не найден $SSHD_CONFIG"
+    local BACKUP_FILE="/etc/ssh/sshd_config.backup_$(date +%Y%m%d_%H%M%S)"
+    cp "$SSHD_CONFIG" "$BACKUP_FILE"
+    log "Резервная копия: $BACKUP_FILE"
+
+    # зачистка старого drop-in (мог содержать ANSI-мусор от старой версии скрипта)
+    if ls /etc/ssh/sshd_config.d/99-homeserver.conf* >/dev/null 2>&1; then
+        warn "Найден старый drop-in 99-homeserver.conf — перемещаю в /root/ssh-fix-backup/"
+        mkdir -p /root/ssh-fix-backup
+        mv /etc/ssh/sshd_config.d/99-homeserver.conf* /root/ssh-fix-backup/ 2>/dev/null || true
+    fi
+
+    local k v
+    set_kv() {
+        k="$1"; v="$2"
+        if grep -q "^$k" "$SSHD_CONFIG"; then sed -i "s|^$k.*|$k $v|" "$SSHD_CONFIG"
+        else echo "$k $v" >> "$SSHD_CONFIG"; fi
+    }
+    set_kv PubkeyAuthentication yes
+    set_kv PasswordAuthentication no
+    set_kv GSSAPIAuthentication no
+    set_kv PermitRootLogin prohibit-password
+    local SSH_CONFIG="/etc/ssh/ssh_config"
+    if grep -q "^GSSAPIAuthentication" "$SSH_CONFIG" 2>/dev/null; then
+        sed -i 's/^GSSAPIAuthentication.*/GSSAPIAuthentication no/' "$SSH_CONFIG"
+    else echo "GSSAPIAuthentication no" >> "$SSH_CONFIG"; fi
+
+    mkdir -p /etc/ssh/sshd_config.d
+    cat > /etc/ssh/sshd_config.d/99-security-settings.conf <<EOF
+Port $port
+PermitRootLogin prohibit-password
+PubkeyAuthentication yes
+PasswordAuthentication no
+PermitEmptyPasswords no
+GSSAPIAuthentication no
+Protocol 2
+X11Forwarding no
+MaxAuthTries 3
+MaxSessions 5
+ClientAliveInterval 300
+ClientAliveCountMax 2
+UseDNS no
+ChallengeResponseAuthentication no
+KerberosAuthentication no
+EOF
+
+    # cloud-init форсирует PasswordAuthentication — отключаем его drop-in
     if [[ -f /etc/ssh/sshd_config.d/50-cloud-init.conf ]]; then
-        if ask_yn "Найден 50-cloud-init.conf (форсирует PasswordAuthentication) — отключить?"; then
+        ask_yn "Найден 50-cloud-init.conf (форсирует PasswordAuthentication) — отключить?" && {
             mv /etc/ssh/sshd_config.d/50-cloud-init.conf "/etc/ssh/sshd_config.d/50-cloud-init.conf.disabled.$(date +%s)"
             log "50-cloud-init.conf отключён (бэкап рядом)."
-        fi
+        }
     fi
-    local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
-    cp "$cfg" "$cfg.bak.$(date +%s)" 2>/dev/null || true
-    {
-        [[ -n "$port" ]] && echo "Port $port"
-        echo "${c_txt}PasswordAuthentication $pwauth${c_off}"
-        echo "${c_txt}PermitRootLogin prohibit-password${c_off}"
-        echo "${c_txt}MaxAuthTries 3${c_off}"
-        echo "${c_txt}ClientAliveInterval 300${c_off}"
-        echo "${c_txt}ClientAliveCountMax 2${c_off}"
-        echo "${c_txt}X11Forwarding no${c_off}"
-        echo "${c_txt}LogLevel VERBOSE${c_off}"
-    } > "$cfg"
+
+    # .ssh пользователя
+    mkdir -p "/home/$username/.ssh"
+    chmod 700 "/home/$username/.ssh"
+    chown -R "$username:$username" "/home/$username/.ssh"
+    if [[ -f "/home/$username/.ssh/authorized_keys" ]]; then
+        chmod 600 "/home/$username/.ssh/authorized_keys"
+        chown "$username:$username" "/home/$username/.ssh/authorized_keys"
+    fi
+
     if ! sshd -t; then
-        local bak; bak=$(ls -1t "$cfg".bak.* 2>/dev/null | head -1)
-        [[ -n "$bak" ]] && cp "$bak" "$cfg"
-        sshd -t && die "конфиг невалиден, откат выполнен — разбирайтесь вручную"
+        warn "Ошибка в конфигурации SSH! Восстанавливаю из резервной копии..."
+        cp "$BACKUP_FILE" "$SSHD_CONFIG"
+        die "Конфигурация восстановлена из бэкапа. Разбирайтесь вручную."
     fi
-    systemctl reload ssh 2>/dev/null || systemctl reload sshd
-    log "SSH-hardening применён (sshd -t пройден, reload). Проверьте новое подключение!"
+
+    # UFW: открыть новый порт (limit), убрать старое правило OpenSSH
+    if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -qi "Status: active"; then
+        ufw limit "$port/tcp" comment 'SSH' >/dev/null 2>&1 || ufw allow "$port/tcp" >/dev/null
+        ufw delete allow OpenSSH >/dev/null 2>&1 || true
+        log "UFW: порт $port/tcp открыт (limit), правило OpenSSH удалено."
+    fi
+
+    if systemctl restart sshd 2>/dev/null; then
+        log "Служба SSH перезапущена (sshd)."
+    else
+        systemctl restart ssh && log "Служба SSH перезапущена (ssh)."
+    fi
+    log "SSH порт: $port | вход по паролю: ОТКЛЮЧЁН"
+    warn "Не закрывайте текущую сессию! Проверьте вход в новом окне: ssh -p $port $username@$IP"
+    read -rp "Enter — назад " _ || true
 }
 
 unattended_status() {
@@ -1000,7 +1070,7 @@ main() {
             20) install_netdata ;;
             21) install_gitea ;;
             22) jitsi_menu ;;
-            q|Q|"") exit 0 ;;
+            0|q|Q|"") exit 0 ;;
             *) warn "нет такого пункта" ;;
         esac
         echo; read -rp "Enter — вернуться в меню " _ || true
