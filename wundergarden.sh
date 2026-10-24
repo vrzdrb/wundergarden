@@ -90,13 +90,14 @@ _t() { # _t KEY — строка интерфейса по LANG_UI (fallback: ru
             BACK)          echo "Enter — back " ;;
             SRV_TITLE) echo " --- Server setup (order = activation order) ---" ;;
             SRV01) echo "Timezone" ;; SRV02) echo "User and sudo" ;;
-            SRV03) echo "sudo logging (+ view log)" ;; SRV04) echo "SSH hardening (keys, port, drop-in + rollback)" ;;
-            SRV05) echo "Unattended-upgrades (host security updates)" ;; SRV06) echo "UFW (firewall)" ;;
-            SRV07) echo "Fail2ban" ;; SRV08) echo "Swap (size/disable)" ;;
-            SRV09) echo "BBR (TCP acceleration)" ;; SRV10) echo "DNS-over-TLS (systemd-resolved)" ;;
-            SRV11) echo "IPv6 (on/off)" ;; SRV12) echo "RKN AS blocklist (ipset, auto-update)" ;;
-            SRV13) echo "Scheduled reboot" ;; SRV14) echo "VPS diagnostics (third-party scripts)" ;;
-            SRV15) echo "Shell history (tuning + view)" ;;
+            SRV03) echo "sudo logging (on/off)" ;;
+            SRV04) echo "View sudo log" ;; SRV05) echo "SSH hardening (keys, port, drop-in + rollback)" ;;
+            SRV06) echo "Unattended-upgrades (host security updates)" ;; SRV07) echo "UFW (firewall)" ;;
+            SRV08) echo "Fail2ban" ;; SRV09) echo "Swap (size/disable)" ;;
+            SRV10) echo "BBR (TCP acceleration)" ;; SRV11) echo "DNS-over-TLS (systemd-resolved)" ;;
+            SRV12) echo "IPv6 (on/off)" ;; SRV13) echo "RKN AS blocklist (ipset, auto-update)" ;;
+            SRV14) echo "Scheduled reboot" ;; SRV15) echo "VPS diagnostics (third-party scripts)" ;;
+            SRV16) echo "Shell history (tuning + view)" ;;
             SRV16) echo "Root mail (cron/unattended alerts via external SMTP)" ;;
             PREP_W1) echo "Next: item 3 (nginx and certificates: certificates first, then startup)." ;;
             PREP_W2) echo "Don't forget: A-records of subdomains -> your static IP, forward 80/443 on the router." ;;
@@ -143,22 +144,23 @@ _t() { # _t KEY — строка интерфейса по LANG_UI (fallback: ru
         BACK)          echo "Enter — назад " ;;
         SRV_TITLE) echo " --- Настройка сервера (порядок = порядок активации) ---" ;;
         SRV01) echo "Часовой пояс" ;; SRV02) echo "Пользователь и sudo" ;;
-        SRV03) echo "Логирование sudo (+ просмотр лога)" ;; SRV04) echo "SSH-hardening (ключи, порт, drop-in + откат)" ;;
-        SRV05) echo "Unattended-upgrades (security-обновления хоста)" ;; SRV06) echo "UFW (фаервол)" ;;
-        SRV07) echo "Fail2ban" ;; SRV08) echo "Swap (размер/отключение)" ;;
-        SRV09) echo "BBR (ускорение TCP)" ;; SRV10) echo "DNS-over-TLS (systemd-resolved)" ;;
-        SRV11) echo "IPv6 (вкл/выкл)" ;; SRV12) echo "Блок-лист AS РКН (ipset, автообновление)" ;;
-        SRV13) echo "Перезагрузка по расписанию" ;; SRV14) echo "Диагностика VPS (сторонние скрипты)" ;;
-        SRV15) echo "История shell (тюнинг + просмотр)" ;;
+        SRV03) echo "Логирование sudo (вкл/выкл)" ;;
+        SRV04) echo "Просмотр лога sudo" ;; SRV05) echo "SSH-hardening (ключи, порт, drop-in + откат)" ;;
+        SRV06) echo "Unattended-upgrades (security-обновления хоста)" ;; SRV07) echo "UFW (фаервол)" ;;
+        SRV08) echo "Fail2ban" ;; SRV09) echo "Swap (размер/отключение)" ;;
+        SRV10) echo "BBR (ускорение TCP)" ;; SRV11) echo "DNS-over-TLS (systemd-resolved)" ;;
+        SRV12) echo "IPv6 (вкл/выкл)" ;; SRV13) echo "Блок-лист AS РКН (ipset, автообновление)" ;;
+        SRV14) echo "Перезагрузка по расписанию" ;; SRV15) echo "Диагностика VPS (сторонние скрипты)" ;;
+        SRV16) echo "История shell (тюнинг + просмотр)" ;;
         SRV16) echo "Почта root'а (оповещения cron/unattended через внешний SMTP)" ;;
         PREP_W1) echo "Дальше: пункт 3 (nginx и сертификаты: сначала сертификаты, затем запуск)." ;;
         PREP_W2) echo "Не забудьте: A-записи поддоменов -> ваш статический IP, проброс 80/443 на роутере." ;;
     esac
 }
 lang_menu() { # переключатель языка / language switcher
-    echo "Язык интерфейса / Interface language:"
-    echo " 1. Русский (по умолчанию)"
-    echo " 2. English"
+    echo "${c_txt}Язык интерфейса / Interface language:${c_off}"
+    echo "${c_txt} 1. Русский (по умолчанию)${c_off}"
+    echo "${c_txt} 2. English${c_off}"
     local c; read -rp "1/2: " c || true
     case "$c" in 2) LANG_UI="en" ;; *) LANG_UI="ru" ;; esac
     [[ -f "$ENV_FILE" ]] && update_env LANG_UI "$LANG_UI"
@@ -215,7 +217,7 @@ MENU
 if [[ "${DEMO:-0}" == "1" ]]; then
     LANG_UI="${LANG_UI:-ru}"
     print_menu
-    echo "(DEMO=1: предпросмотр оформления. Установка — на Debian/Ubuntu под root, без DEMO.)"
+    echo "${c_txt}(DEMO=1: предпросмотр оформления. Установка — на Debian/Ubuntu под root, без DEMO.)${c_off}"
     exit 0
 fi
 
@@ -237,17 +239,11 @@ preflight() {
     esac
     command -v curl >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq curl; }
     command -v openssl >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq openssl; }
-    # ресурсы — предупреждения, не блокировки
-    local mem_kb swap_kb free_mb
-    mem_kb="$(awk '/^MemTotal:/{print $2}' /proc/meminfo)"
-    swap_kb="$(awk '/^SwapTotal:/{print $2}' /proc/meminfo)"
-    if (( mem_kb + swap_kb < 1500000 )); then
-        warn "RAM+swap < ~1.5 ГБ — часть сервисов не встанет. Сначала пункт 1.8 (Swap) в меню."
-    fi
-    free_mb="$(df -m /var/lib/docker 2>/dev/null | awk 'NR==2{print $4}')"
-    [[ -z "$free_mb" ]] && free_mb="$(df -m / | awk 'NR==2{print $4}')"
+    # ресурсы — только предупреждение о диске (RAM не проверяем: набор сервисов разворачивается выборочно)
+    local free_mb
+    free_mb="$({ df -m /var/lib/docker 2>/dev/null || df -m /; } | awk 'NR==2{print $4}' || true)"
     if [[ -n "$free_mb" && "$free_mb" -lt 10000 ]]; then
-        warn "свободно < 10 ГБ на диске docker — образы и данные займут ~15–20 ГБ."
+        warn "свободно < 10 ГБ на диске — образы и данные займут ~15–20 ГБ."
     fi
     # сеть: короткий проба, только предупреждение
     if ! curl -fsI --max-time 5 https://download.docker.com >/dev/null 2>&1; then
@@ -272,7 +268,7 @@ show_logs() { # show_logs контейнер [контейнер...]
             warn "$c: $(_t LOGS_NOTRUN)"
             continue
         fi
-        echo "===== $c $(_t LOGS_TAIL) ====="
+        echo "${c_txt}===== $c $(_t LOGS_TAIL) =====${c_off}"
         docker compose logs --tail=50 "$c" 2>&1 | tail -n 50
         echo
     done
@@ -284,7 +280,7 @@ logs_menu() { # logs_menu контейнер [контейнер...]
         echo; echo "$(_t LOGS_TITLE)"
         local i
         for i in "${!cs[@]}"; do printf '  %d) %s\n' "$((i+1))" "${cs[$i]}"; done
-        echo "  a) $(_t LOGS_ALL)"
+        echo "${c_txt}  a) $(_t LOGS_ALL)${c_off}"
         local n
         read -rp "$(_t LOGS_NUM)" n || true
         case "$n" in
@@ -348,8 +344,8 @@ updates_menu() {
             warn "ни одного контейнера не найдено — сначала установите сервисы (пункты 1-12)."
             return 0
         fi
-        echo "  a) обновить ВСЁ разом (docker compose pull && up -d)"
-        echo "  c) очистить повисшие слои образов (docker image prune -f)"
+        echo "${c_txt}  a) обновить ВСЁ разом (docker compose pull && up -d)${c_off}"
+        echo "${c_txt}  c) очистить повисшие слои образов (docker image prune -f)${c_off}"
         local n
         read -rp "$(_t PROMPT_UPD)" n || true
         case "$n" in
@@ -444,7 +440,7 @@ fail2ban_menu() {
     while true; do
         cat <<SUM
 
- --- Fail2ban: порты нашего стека и защита ---
+${c_mag} --- Fail2ban: порты нашего стека и защита ---${c_off}
   Порт          Сервис                  Защита
   22/tcp        SSH (sshd)              $(f2b_jail_state sshd)
   80/tcp        nginx (HTTP)            редирект на HTTPS
@@ -458,15 +454,15 @@ fail2ban_menu() {
   8384,8080     админки                 только localhost — fail2ban не нужен
   19999/tcp     netdata                 только localhost (127.0.0.1) — fail2ban не нужен
 
- --- Настройки ---
-  1. Защита SSH: $(onoff "$f2b_enabled")
-  2. bantime (длительность бана): ${bantime} с = $((bantime/60)) мин
-  3. maxretry (попыток до бана): $maxretry
-  4. findtime (окно подсчёта): ${findtime} с = $((findtime/60)) мин
-  5. Recidive (заядлые -> бан на неделю): $(onoff "$recidive")
-  6. Jail nginx-ботов (basicauth/лимиты; бан в DOCKER-USER): $(onoff "$nginx_jail")
-  7. SSH-порт для jail: $ssh_port
-  8. Применить и перезапустить fail2ban
+${c_mag} --- Настройки ---${c_off}
+  ${c_num}1.${c_off} ${c_txt}Защита SSH: $(onoff "$f2b_enabled")${c_off}
+  ${c_num}2.${c_off} ${c_txt}bantime (длительность бана): ${bantime} с = $((bantime/60)) мин${c_off}
+  ${c_num}3.${c_off} ${c_txt}maxretry (попыток до бана): $maxretry${c_off}
+  ${c_num}4.${c_off} ${c_txt}findtime (окно подсчёта): ${findtime} с = $((findtime/60)) мин${c_off}
+  ${c_num}5.${c_off} ${c_txt}Recidive (заядлые -> бан на неделю): $(onoff "$recidive")${c_off}
+  ${c_num}6.${c_off} ${c_txt}Jail nginx-ботов (basicauth/лимиты; бан в DOCKER-USER): $(onoff "$nginx_jail")${c_off}
+  ${c_num}7.${c_off} ${c_txt}SSH-порт для jail: $ssh_port${c_off}
+  ${c_num}8.${c_off} ${c_txt}Применить и перезапустить fail2ban${c_off}
 
 SUM
         read -rp "Номер пункта (L — логи fail2ban, Enter — назад): " c || true
@@ -520,19 +516,40 @@ user_setup() {
         passwd "$u"
     else
         passwd -l "$u" >/dev/null 2>&1 || true
-        log "Пароль не задан (заблокирован). Добавьте ключ: ssh-copy-id $u@<хост>"
+        local ip; ip="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || echo '<IP сервера>')"
+        cat <<EOF
+${c_mag}=== SSH-ключ для входа $u@$ip ===${c_off}
+${c_txt}1. На своём компьютере создайте ключ (Enter на все вопросы):${c_off}
+   ${c_txt}ssh-keygen -t ed25519${c_off}
+${c_txt}2. Загрузите его на сервер:${c_off}
+   ${c_txt}Linux/macOS:  ssh-copy-id -i ~/.ssh/id_ed25519.pub $u@$ip${c_off}
+   ${c_txt}Windows (PowerShell):${c_off}
+   ${c_txt}type \$env:USERPROFILE\.ssh\id_ed25519.pub | ssh $u@$ip "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"${c_off}
+${c_txt}3. Проверьте вход по ключу:${c_off}
+   ${c_txt}ssh $u@$ip${c_off}
+${c_dim}4. Только после успешного входа — отключите парольный вход: п.5 «SSH-hardening» (там же смена порта).${c_off}
+EOF
     fi
     id "$u"
 }
 
-sudo_logging_setup() {
-    cat > /etc/sudoers.d/99-homeserver-logging <<'EOF'
+sudo_logging_toggle() {
+    local f=/etc/sudoers.d/99-homeserver-logging
+    if [[ -f "$f" ]]; then
+        ask_yn "Логирование sudo включено — отключить?" && { rm -f "$f" && log "Логирование sudo отключено."; }
+        return 0
+    fi
+    cat > "$f" <<'EOF'
 Defaults logfile=/var/log/sudo.log
 Defaults loglinelen=0
 Defaults log_year,tty_tickets
 EOF
-    visudo -cf /etc/sudoers.d/99-homeserver-logging >/dev/null && log "Логирование sudo -> /var/log/sudo.log"
-    sudo_log_view
+    if visudo -cf "$f" >/dev/null; then
+        log "Логирование sudo -> /var/log/sudo.log"
+        log "Файл появится после первой sudo-команды (sudo -n true создаст его сразу)."
+    else
+        rm -f "$f"; die "visudo не принял конфиг — откат."
+    fi
 }
 shell_history_setup() {
     cat > /etc/profile.d/99-homeserver-history.sh <<'EOF'
@@ -559,17 +576,26 @@ shell_history_view() {
 }
 
 sudo_log_view() {
-    [[ -f /var/log/sudo.log ]] && { echo "--- /var/log/sudo.log (последние 50):"; tail -n 50 /var/log/sudo.log; } || warn "лога нет — включите логирование (п.3)"
-    read -rp "$(_t BACK)" _ || true
+    if [[ ! -f /var/log/sudo.log ]]; then
+        if [[ -f /etc/sudoers.d/99-homeserver-logging ]]; then
+            warn "Логирование включено, но событий ещё не было — файл создаётся при первой sudo-команде."
+            ask_yn "Создать тестовую запись сейчас (sudo -n true)?" && sudo -n true 2>/dev/null
+        else
+            warn "Логирование sudo выключено — включите (п.3)."
+        fi
+    else
+        echo "${c_txt}--- /var/log/sudo.log (последние 50 строк):${c_off}"
+        tail -n 50 /var/log/sudo.log
+    fi
+    read -rp "Enter — назад " _ || true
 }
-
 ssh_harden() {
     log "=== SSH-hardening ==="
     warn "Не закрывайте текущую сессию! После применения проверьте вход в НОВОМ окне."
     local port pwauth
     port="$(ask "Порт SSH (Enter — не менять)" "")"
     [[ -n "$port" && ! "$port" =~ ^[0-9]{1,5}$ ]] && { warn "нужно число — порт не меняю"; port=""; }
-    echo "PasswordAuthentication no — только ключи. Убедитесь, что ключ уже работает!"
+    echo "${c_txt}PasswordAuthentication no — только ключи. Убедитесь, что ключ уже работает!${c_off}"
     ask_yn "Отключить вход по паролю?" && pwauth="no" || pwauth="yes"
     # cloud-init форсирует PasswordAuthentication yes — отключаем его drop-in
     if [[ -f /etc/ssh/sshd_config.d/50-cloud-init.conf ]]; then
@@ -582,13 +608,13 @@ ssh_harden() {
     cp "$cfg" "$cfg.bak.$(date +%s)" 2>/dev/null || true
     {
         [[ -n "$port" ]] && echo "Port $port"
-        echo "PasswordAuthentication $pwauth"
-        echo "PermitRootLogin prohibit-password"
-        echo "MaxAuthTries 3"
-        echo "ClientAliveInterval 300"
-        echo "ClientAliveCountMax 2"
-        echo "X11Forwarding no"
-        echo "LogLevel VERBOSE"
+        echo "${c_txt}PasswordAuthentication $pwauth${c_off}"
+        echo "${c_txt}PermitRootLogin prohibit-password${c_off}"
+        echo "${c_txt}MaxAuthTries 3${c_off}"
+        echo "${c_txt}ClientAliveInterval 300${c_off}"
+        echo "${c_txt}ClientAliveCountMax 2${c_off}"
+        echo "${c_txt}X11Forwarding no${c_off}"
+        echo "${c_txt}LogLevel VERBOSE${c_off}"
     } > "$cfg"
     if ! sshd -t; then
         local bak; bak=$(ls -1t "$cfg".bak.* 2>/dev/null | head -1)
@@ -662,8 +688,8 @@ ipv6_setup() {
 abuse_block_setup() { # проактивный abuse-ipset (репутационные фиды)
     local script=/opt/homeserver/abuse-block.sh cron=/etc/cron.d/homeserver-abuse
     if [[ -f "$script" ]]; then
-        echo "Abuse-лист: активен ($(ipset list abuse4 2>/dev/null | grep -c '^[0-9]' || echo 0) сетей)"
-        echo "  фид: ${ABUSE_FEED:-не задан}"
+        echo "${c_txt}Abuse-лист: активен ($(ipset list abuse4 2>/dev/null | grep -c '^[0-9]' || echo 0) сетей)${c_off}"
+        echo "${c_txt}  фид: ${ABUSE_FEED:-не задан}${c_off}"
         ask_yn "Отключить и удалить?" && {
             iptables -D INPUT -m set --match-set abuse4 src -j DROP 2>/dev/null
             iptables -D DOCKER-USER -m set --match-set abuse4 src -j DROP 2>/dev/null
@@ -672,13 +698,13 @@ abuse_block_setup() { # проактивный abuse-ipset (репутацион
         return 0
     fi
     command -v ipset >/dev/null || apt-get install -y -qq ipset
-    echo "Abuse-фид: список IP/сетей с плохой репутацией (сканеры, брутфорсеры, спамеры)."
-    echo "В отличие от fail2ban (реагирует) и RKN-листа (реестр) — дроп ДО первой попытки."
-    echo "Применяется на входящие (INPUT + DOCKER-USER). Внимание: большие фиды могут задеть VPN/шейред-IP."
-    echo " 1) dshield.netset — топ-20 атакующих /24 за 30 дней; ~20 записей, минимум ложных (рекомендуется)"
-    echo " 2) firehol_level1.netset — жёсткая агрегация (Spamhaus DROP/EDROP, DShield...); ~30k записей"
-    echo " 3) firehol_level2.netset — шире; ~80k записей, заметно больше ложных срабатываний"
-    echo " 4) свой URL (plain text, CIDR по одному на строку)"
+    echo "${c_txt}Abuse-фид: список IP/сетей с плохой репутацией (сканеры, брутфорсеры, спамеры).${c_off}"
+    echo "${c_txt}В отличие от fail2ban (реагирует) и RKN-листа (реестр) — дроп ДО первой попытки.${c_off}"
+    echo "${c_txt}Применяется на входящие (INPUT + DOCKER-USER). Внимание: большие фиды могут задеть VPN/шейред-IP.${c_off}"
+    echo "${c_txt} 1) dshield.netset — топ-20 атакующих /24 за 30 дней; ~20 записей, минимум ложных (рекомендуется)${c_off}"
+    echo "${c_txt} 2) firehol_level1.netset — жёсткая агрегация (Spamhaus DROP/EDROP, DShield...); ~30k записей${c_off}"
+    echo "${c_txt} 3) firehol_level2.netset — шире; ~80k записей, заметно больше ложных срабатываний${c_off}"
+    echo "${c_txt} 4) свой URL (plain text, CIDR по одному на строку)${c_off}"
     local url
     case "$(ask "1-4" "1")" in
         2) url="https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level1.netset" ;;
@@ -713,11 +739,11 @@ ABEOF
 rkn_block_menu() { # п.12: оба списка
     while true; do
         echo
-        echo " --- IP-блок-листы (ipset) ---"
+        echo "${c_txt} --- IP-блок-листы (ipset) ---${c_off}"
         [[ -f /opt/homeserver/rkn-block.sh ]] && st_rkn="активен" || st_rkn="выкл"
         [[ -f /opt/homeserver/abuse-block.sh ]] && st_ab="активен" || st_ab="выкл"
-        echo " 1) Блок-лист AS РКН: $st_rkn"
-        echo " 2) Abuse-лист (репутационные фиды): $st_ab"
+        echo "${c_txt} 1) Блок-лист AS РКН: $st_rkn${c_off}"
+        echo "${c_txt} 2) Abuse-лист (репутационные фиды): $st_ab${c_off}"
         read -rp "Номер (Enter — назад): " c || true
         case "$c" in
             1) rkn_block_setup ;; 2) abuse_block_setup ;;
@@ -729,7 +755,7 @@ rkn_block_menu() { # п.12: оба списка
 rkn_block_setup() {
     local script=/opt/homeserver/rkn-block.sh cron=/etc/cron.d/homeserver-rkn
     if [[ -f "$script" ]]; then
-        echo "Блок-лист АС РКН: активен ($(ipset list rkn4 2>/dev/null | grep -c '^[0-9]' || echo 0) сетей)"
+        echo "${c_txt}Блок-лист АС РКН: активен ($(ipset list rkn4 2>/dev/null | grep -c '^[0-9]' || echo 0) сетей)${c_off}"
         ask_yn "Отключить и удалить?" && {
             iptables -D INPUT -m set --match-set rkn4 src -j DROP 2>/dev/null
             iptables -D DOCKER-USER -m set --match-set rkn4 src -j DROP 2>/dev/null
@@ -763,14 +789,14 @@ RKNEOF
 
 root_mail_setup() { # оповещения root'а через внешний SMTP (без открытого 25-го порта)
     if command -v msmtp >/dev/null && grep -qs "account default" /etc/msmtprc 2>/dev/null; then
-        echo "Почта root'а уже настроена:"
+        echo "${c_txt}Почта root'а уже настроена:${c_off}"
         grep -E '^(host|port|from):' /etc/msmtprc | sed 's/^/  /'
         grep -q '^MAILTO=' /etc/cron.d/homeserver-backup 2>/dev/null && echo "  cron MAILTO: задан"
         ask_yn "Перенастроить?" || return 0
     fi
     apt-get install -y -qq msmtp msmtp-mta
-    echo "Внешний SMTP для оповещений (cron, unattended-upgrades). Исходящие только, 465/587 — порт 25 не нужен."
-    echo "Для Gmail/Yandex нужен ПАРОЛЬ ПРИЛОЖЕНИЯ (не основной пароль)."
+    echo "${c_txt}Внешний SMTP для оповещений (cron, unattended-upgrades). Исходящие только, 465/587 — порт 25 не нужен.${c_off}"
+    echo "${c_txt}Для Gmail/Yandex нужен ПАРОЛЬ ПРИЛОЖЕНИЯ (не основной пароль).${c_off}"
     local host port user pass rcpt only_err
     host="$(ask "SMTP-хост (напр. smtp.gmail.com, smtp.yandex.ru)" "smtp.yandex.ru")"
     [[ "$host" =~ ^[a-zA-Z0-9.-]+$ ]] || die "некорректный хост: '$host'"
@@ -833,7 +859,7 @@ EOF
 sched_reboot_setup() {
     local cron=/etc/cron.d/homeserver-reboot
     echo "Текущее расписание: $(cat "$cron" 2>/dev/null | grep -v '^#' || echo 'нет')"
-    echo " 1) выключить  2) еженедельно (понедельник 05:00)  3) ежемесячно (1-е число 05:00)"
+    echo "${c_txt} 1) выключить  2) еженедельно (понедельник 05:00)  3) ежемесячно (1-е число 05:00)${c_off}"
     case "$(ask "1/2/3" "2")" in
         1) rm -f "$cron"; log "автоперезагрузка выключена" ;;
         3) printf '0 5 1 * * root /sbin/reboot\n' > "$cron"; log "перезагрузка: ежемесячно, 1-е, 05:00" ;;
@@ -843,10 +869,10 @@ sched_reboot_setup() {
 
 diag_menu() {
     warn "Диагностика — сторонний код, исполняется через curl | bash. Смотрите скрипты перед запуском!"
-    echo " 1) vps-audit (аудит базовой защищённости)"
-    echo " 2) ipregion (регион/маршрут IP)"
-    echo " 3) Check.Place (IP-качество: скорость/пинг/стриминг)"
-    echo " 4) LemonBench (бенчмарк CPU/диска/сети)"
+    echo "${c_txt} 1) vps-audit (аудит базовой защищённости)${c_off}"
+    echo "${c_txt} 2) ipregion (регион/маршрут IP)${c_off}"
+    echo "${c_txt} 3) Check.Place (IP-качество: скорость/пинг/стриминг)${c_off}"
+    echo "${c_txt} 4) LemonBench (бенчмарк CPU/диска/сети)${c_off}"
     local n; n="$(ask "1-4 (Enter — назад)" "")"
     case "$n" in
         1) bash <(curl -fsSL https://raw.githubusercontent.com/hidden-refuge/vps-audit/main/vps-audit.sh) ;;
@@ -863,30 +889,29 @@ server_menu() {
         cat <<SUM
 
 $(_t SRV_TITLE)
-  1. $(_t SRV01)
-  2. $(_t SRV02)
-  3. $(_t SRV03)
-  4. $(_t SRV04)
-  5. $(_t SRV05)
-  6. $(_t SRV06)
-  7. $(_t SRV07)
-  8. $(_t SRV08)
-  9. $(_t SRV09)
- 10. $(_t SRV10)
- 11. $(_t SRV11)
- 12. $(_t SRV12)
- 13. $(_t SRV13)
- 14. $(_t SRV14)
- 15. $(_t SRV15)
- 16. $(_t SRV16)
-
+  ${c_num}1.${c_off} ${c_txt}$(_t SRV01)${c_off}
+  ${c_num}2.${c_off} ${c_txt}$(_t SRV02)${c_off}
+  ${c_num}3.${c_off} ${c_txt}$(_t SRV03)${c_off}
+  ${c_num}4.${c_off} ${c_txt}$(_t SRV04)${c_off}
+  ${c_num}5.${c_off} ${c_txt}$(_t SRV05)${c_off}
+  ${c_num}6.${c_off} ${c_txt}$(_t SRV06)${c_off}
+  ${c_num}7.${c_off} ${c_txt}$(_t SRV07)${c_off}
+  ${c_num}8.${c_off} ${c_txt}$(_t SRV08)${c_off}
+  ${c_num}9.${c_off} ${c_txt}$(_t SRV09)${c_off}
+ ${c_num}10.${c_off} ${c_txt}$(_t SRV10)${c_off}
+ ${c_num}11.${c_off} ${c_txt}$(_t SRV11)${c_off}
+ ${c_num}12.${c_off} ${c_txt}$(_t SRV12)${c_off}
+ ${c_num}13.${c_off} ${c_txt}$(_t SRV13)${c_off}
+ ${c_num}14.${c_off} ${c_txt}$(_t SRV14)${c_off}
+ ${c_num}15.${c_off} ${c_txt}$(_t SRV15)${c_off}
+ ${c_num}16.${c_off} ${c_txt}$(_t SRV16)${c_off}
 SUM
         read -rp "$(_t PROMPT_BACK)" c || true
         case "$c" in
-            1) tz_setup ;; 2) user_setup ;; 3) sudo_logging_setup ;;
-            4) ssh_harden ;; 5) unattended_status ;; 6) setup_ufw ;; 7) fail2ban_menu ;;
-            8) swap_setup ;; 9) bbr_setup ;; 10) dot_setup ;; 11) ipv6_setup ;;
-            12) rkn_block_menu ;; 13) sched_reboot_setup ;; 14) diag_menu ;; 15) shell_history_setup ;; 16) root_mail_setup ;;
+            1) tz_setup ;; 2) user_setup ;; 3) sudo_logging_toggle ;; 4) sudo_log_view ;;
+            5) ssh_harden ;; 6) unattended_status ;; 7) setup_ufw ;; 8) fail2ban_menu ;;
+            9) swap_setup ;; 10) bbr_setup ;; 11) dot_setup ;; 12) ipv6_setup ;;
+            13) rkn_block_menu ;; 14) sched_reboot_setup ;; 15) diag_menu ;; 16) shell_history_setup ;; 16) root_mail_setup ;;
             "") return 0 ;; *) warn "нет такого пункта" ;;
         esac
     done
@@ -899,17 +924,21 @@ SUM
 
 setup_ufw() {
     log "=== UFW (фаервол) ==="
+    echo "${c_txt}UFW фильтрует трафик хоста (цепочка INPUT). Важно: порты, опубликованные Docker'ом${c_off}"
+    echo "${c_txt}(Luanti 30000/udp, Mumble 64738, SFTP 2022 при режиме 'наружу', JVB 10000/udp) идут через${c_off}"
+    echo "${c_txt}цепочку DOCKER мимо UFW — 'ufw allow/deny' на них НЕ действует. Ими управляют:${c_off}"
+    echo "${c_txt}  - bind 127.0.0.1 vs 0.0.0.0 в меню сервиса (SFTPGo, Syncthing GUI — уже так);${c_off}"
+    echo "${c_txt}  - внешний фаервол: проброс портов на роутере / security group у провайдера VPS;${c_off}"
+    echo "${c_txt}  - цепочка DOCKER-USER (её используют наши IP-блок-листы, п.13).${c_off}"
+    echo "${c_txt}Host-network сервисы (coturn) и SSH/80/443 — фильтруются UFW напрямую.${c_off}"
     command -v ufw >/dev/null || { apt-get install -y -qq ufw; }
     ufw allow OpenSSH >/dev/null
-    ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null
-    ask_yn "Открыть 30000/udp (Luanti)?" && ufw allow 30000/udp >/dev/null || true
-    ask_yn "Открыть порты TURN (3478 + 49152-65535/udp, звонки Matrix)?" \
+    ufw allow 80/tcp >/dev/null
+    ufw allow 443/tcp >/dev/null
+    ask_yn "Открыть порты TURN (3478 + 49152-65535/udp)? coturn работает в host-network — UFW здесь реально фильтрует." \
         && { ufw allow 3478/tcp >/dev/null; ufw allow 3478/udp >/dev/null; ufw allow 49152:65535/udp >/dev/null; } || true
-    ask_yn "Открыть 2022/tcp (SFTP из SFTPGo, если включили в пункте 3)?" && ufw allow 2022/tcp >/dev/null || true
-    ask_yn "Открыть 64738/tcp+udp (Mumble)?" && { ufw allow 64738/tcp >/dev/null; ufw allow 64738/udp >/dev/null; } || true
-    ufw allow 22000/tcp >/dev/null; ufw allow 22000/udp >/dev/null; ufw allow 21027/udp >/dev/null
     ufw --force enable >/dev/null
-    log "UFW включён: 80,443/tcp; Syncthing-порты; админки снаружи закрыты."
+    log "UFW включён: OpenSSH, 80/tcp, 443/tcp + TURN (если разрешили). Docker-порты — см. пояснение выше."
 }
 
 setup_backups() {
