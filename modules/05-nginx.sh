@@ -53,7 +53,7 @@ dns_hint() { # dns_hint subdomain
 
 front_nginx_menu() {
     while true; do
-        cat <<'SUM'
+        cat <<SUM
 
  --- nginx и сертификаты ---
   1. Сертификаты (acme.sh, wildcard DNS-01) — делать ПЕРВЫМ
@@ -80,8 +80,8 @@ certs_menu() { # certs_menu [auto] — без подменю (для "устан
     fi
     load_env
     local prov="${ACME_DNS_PROVIDER:-dns_cf}"
-    echo "DNS-провайдер acme.sh (код модуля): dns_cf (Cloudflare), dns_selectel, dns_desec, dns_hetzner,"
-    echo "  dns_yandex, dns_regru... Полный список: https://github.com/acmesh-official/acme.sh/wiki/dnsapi"
+    echo "${c_txt}DNS-провайдер acme.sh (код модуля): dns_cf (Cloudflare), dns_selectel, dns_desec, dns_hetzner,${c_off}"
+    echo "${c_txt}  dns_yandex, dns_regru... Полный список: https://github.com/acmesh-official/acme.sh/wiki/dnsapi${c_off}"
     prov="$(ask "Код провайдера" "$prov")"
     local key1 key2
     case "$prov" in
@@ -134,11 +134,11 @@ nginx_menu() {
         local st; st=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -qx homeserver-nginx-1 && echo "запущен" || echo "не запущен")
         cat <<SUM
 
- --- nginx: $st ---
-  1. Запустить / перезапустить (с проверкой конфига)
-  2. Stream-пасsthrough домены (SNI -> внешний TLS-терминатор): ${STREAM_DOMAINS:-нет}
-  3. Показать полный текущий конфиг (nginx -T)
-  4. HSTS (max-age=1 год; БЕЗ includeSubDomains и preload): $(onoff "${HSTS_ENABLED:-false}")
+${c_mag} --- nginx: $st ---${c_off}
+  ${c_num}1.${c_off} ${c_txt}Запустить / перезапустить (с проверкой конфига)${c_off}
+  ${c_num}2.${c_off} ${c_txt}Stream-пасsthrough домены (SNI -> внешний TLS-терминатор): ${STREAM_DOMAINS:-нет}${c_off}
+  ${c_num}3.${c_off} ${c_txt}Показать полный текущий конфиг (nginx -T)${c_off}
+  ${c_num}4.${c_off} ${c_txt}HSTS (max-age=1 год; БЕЗ includeSubDomains и preload): $(onoff "${HSTS_ENABLED:-false}")${c_off}
   Порты: 80 (редирект), 443 (stream: SNI-роутинг, по умолчанию -> локальный HTTPS),
          64738 (Mumble, TLS терминирует nginx).
 
@@ -164,8 +164,8 @@ SUM
                 if [[ "${HSTS_ENABLED:-false}" == "true" ]]; then
                     HSTS_ENABLED="false"
                 else
-                    echo "HSTS: браузеры будут ОБЯЗАНЫ ходить по HTTPS год. Откат, если HTTPS сломается,"
-                    echo "возможен только через max-age=0 на работающем HTTPS. includeSubDomains/preload НЕ включаем."
+                    echo "${c_txt}HSTS: браузеры будут ОБЯЗАНЫ ходить по HTTPS год. Откат, если HTTPS сломается,${c_off}"
+                    echo "${c_txt}возможен только через max-age=0 на работающем HTTPS. includeSubDomains/preload НЕ включаем.${c_off}"
                     ask_yn "Включить HSTS?" && HSTS_ENABLED="true" || HSTS_ENABLED="false"
                 fi
                 update_env HSTS_ENABLED "$HSTS_ENABLED"
@@ -184,9 +184,9 @@ SUM
                 fi
                 read -rp "$(_t BACK)" _ || true ;;
             2)
-                echo "Домены, TLS которых должен проходить насквозь (SNI -> loopback-порт внешнего терминатора)."
-                echo "Формат записи: домен:порт (через запятую). Терминатор слушает на loopback хоста."
-                echo "Текущий список: ${STREAM_DOMAINS:-пусто}"
+                echo "${c_txt}Домены, TLS которых должен проходить насквозь (SNI -> loopback-порт внешнего терминатора).${c_off}"
+                echo "${c_txt}Формат записи: домен:порт (через запятую). Терминатор слушает на loopback хоста.${c_off}"
+                echo "${c_txt}Текущий список: ${STREAM_DOMAINS:-пусто}${c_off}"
                 local lst; lst="$(ask "Новый список (пусто — очистить)" "${STREAM_DOMAINS:-}")"
                 lst="${lst// /}"
                 local entry_clean="" e d p
@@ -202,7 +202,7 @@ SUM
                 lst="$entry_clean"; update_env STREAM_DOMAINS "$lst"
                 # пересобираем map
                 {
-                    echo "map \$ssl_preread_server_name \$stream_upstream {"
+                    echo "${c_txt}map \$ssl_preread_server_name \$stream_upstream {${c_off}"
                     local entry d p
                     IFS=','; for entry in $lst; do
                         [[ -z "$entry" ]] && continue
@@ -210,9 +210,9 @@ SUM
                         [[ "$p" == "$d" ]] && p="8444"
                         printf '    %-40s host_passthrough_%s;\n' "$d" "$p"
                     done; unset IFS
-                    echo "    default web_tls;"
-                    echo "}"
-                    echo "upstream web_tls { server 127.0.0.1:8443; }"
+                    echo "${c_txt}    default web_tls;${c_off}"
+                    echo "${c_txt}}${c_off}"
+                    echo "${c_txt}upstream web_tls { server 127.0.0.1:8443; }${c_off}"
                     IFS=','; for entry in $lst; do
                         [[ -z "$entry" ]] && continue
                         p="${entry##*:}"; [[ "$p" == "$entry" ]] && p="8444"

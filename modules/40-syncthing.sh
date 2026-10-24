@@ -16,19 +16,19 @@ install_syncthing() {
         [[ "$gui_mode" == "public" ]] && gui_descr="субдомен https://$SUB_SYNC (+basicauth и пароль GUI)"
         cat <<SUM
 
- --- Настройки Syncthing ---
-  1. GUI: $gui_descr
-  2. Логин/пароль GUI: $gui_user / (см. .env: SYNCTHING_GUI_AUTH)
-  3. Имя устройства: $devname
-  4. Папка синхронизации по умолчанию: $syncdir
-  5. Интервал пересборки папки: ${rescan} с (0 — только события ФС)
+${c_mag} --- Настройки Syncthing ---${c_off}
+  ${c_num}1.${c_off} ${c_txt}GUI: $gui_descr${c_off}
+  ${c_num}2.${c_off} ${c_txt}Логин/пароль GUI: $gui_user / (см. .env: SYNCTHING_GUI_AUTH)${c_off}
+  ${c_num}3.${c_off} ${c_txt}Имя устройства: $devname${c_off}
+  ${c_num}4.${c_off} ${c_txt}Папка синхронизации по умолчанию: $syncdir${c_off}
+  ${c_num}5.${c_off} ${c_txt}Интервал пересборки папки: ${rescan} с (0 — только события ФС)${c_off}
 
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
         case "$c" in
             1)
-                echo " 1) только localhost — GUI через SSH-туннель (безопаснее)"
-                echo " 2) субдомен с basicauth — удобно из браузера, но GUI торчит наружу"
+                echo "${c_txt} 1) только localhost — GUI через SSH-туннель (безопаснее)${c_off}"
+                echo "${c_txt} 2) субдомен с basicauth — удобно из браузера, но GUI торчит наружу${c_off}"
                 case "$(ask "1/2" "1")" in
                     2) gui_mode="public"
                        SUB_SYNC="$(ask "Поддомен GUI" "$SUB_SYNC")"; update_env SUB_SYNC "$SUB_SYNC"
@@ -45,9 +45,9 @@ SUM
             3) devname="$(ask "Имя устройства (видят пиры при синхронизации)" "$devname")" ;;
             4) syncdir="$(ask "Хост-путь папки (сюда кладите .kdbx от KeePass)" "$syncdir")" ;;
             5)
-                echo "Как часто Syncthing сканирует папку на изменения."
-                echo "0 — только события файловой системы (самый экономный, на Linux надёжен);"
-                echo "3600 — раз в час (дефолт); значения ниже — чаще сканирование и больше CPU на больших папках."
+                echo "${c_txt}Как часто Syncthing сканирует папку на изменения.${c_off}"
+                echo "${c_txt}0 — только события файловой системы (самый экономный, на Linux надёжен);${c_off}"
+                echo "${c_txt}3600 — раз в час (дефолт); значения ниже — чаще сканирование и больше CPU на больших папках.${c_off}"
                 local rs; rs="$(ask "Интервал, секунд" "$rescan")"
                 [[ "$rs" =~ ^[0-9]+$ ]] && rescan="$rs" || warn "нужно число — оставляю $rescan" ;;
             L|l|Д|д) logs_menu syncthing ;;

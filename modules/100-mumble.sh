@@ -22,15 +22,15 @@ install_mumble() {
         esac
         cat <<SUM
 
- --- Настройки Mumble (Murmur) ---
-  1. Пароль сервера: $pw_descr
-  2. SuperUser-пароль: задан (в .env, при желании перегенерируйте)
-  3. Приветствие: $welcome
-  4. Битрейт на пользователя: $bw бит/с
-  5. Лимит пользователей: $users
-  6. Подсказка Push-to-Talk: $ptt_descr
-  7. Образ: $img
-  8. TLS-сертификат: $tls_descr
+${c_mag} --- Настройки Mumble (Murmur) ---${c_off}
+  ${c_num}1.${c_off} ${c_txt}Пароль сервера: $pw_descr${c_off}
+  ${c_num}2.${c_off} ${c_txt}SuperUser-пароль: задан (в .env, при желании перегенерируйте)${c_off}
+  ${c_num}3.${c_off} ${c_txt}Приветствие: $welcome${c_off}
+  ${c_num}4.${c_off} ${c_txt}Битрейт на пользователя: $bw бит/с${c_off}
+  ${c_num}5.${c_off} ${c_txt}Лимит пользователей: $users${c_off}
+  ${c_num}6.${c_off} ${c_txt}Подсказка Push-to-Talk: $ptt_descr${c_off}
+  ${c_num}7.${c_off} ${c_txt}Образ: $img${c_off}
+  ${c_num}8.${c_off} ${c_txt}TLS-сертификат: $tls_descr${c_off}
 
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
@@ -39,8 +39,8 @@ SUM
             2) su_pw="$(gen_pass)"; log "Новый SuperUser-пароль: $su_pw" ;;
             3) welcome="$(ask "Приветствие (без кавычек)" "$welcome")" ;;
             4)
-                echo " 72000 — отличное качество, до ~50 юзеров (вам хватит с запасом)"
-                echo " 54000 — чуть ниже качество, 50+ юзеров | 36000 — экономия канала"
+                echo "${c_txt} 72000 — отличное качество, до ~50 юзеров (вам хватит с запасом)${c_off}"
+                echo "${c_txt} 54000 — чуть ниже качество, 50+ юзеров | 36000 — экономия канала${c_off}"
                 local bw_new; bw_new="$(ask "Битрейт (число)" "$bw")"
                 [[ "$bw_new" =~ ^[0-9]+$ ]] && bw="$bw_new" || warn "нужно число — оставляю $bw" ;;
             5)
@@ -49,11 +49,11 @@ SUM
             6) [[ "$ptt" == "true" ]] && ptt="false" || ptt="true" ;;
             7) img="$(ask "Образ (latest / latest-acme для ACME-сертификатов)" "$img")" ;;
             8)
-                echo "Mumble терминирует TLS сам (контейнер публикует 64738 напрямую). Источник сертификата:"
-                echo " 1) acme.sh — wildcard из config/nginx/certs (пункт 13), рекомендуется"
-                echo " 2) /etc/letsencrypt — certbot/другой acme-клиент"
-                echo " 3) указать пути к fullchain.pem/privkey.pem вручную"
-                echo " 4) аварийный self-signed (НЕ рекомендуется — клиенты увидят предупреждение)"
+                echo "${c_txt}Mumble терминирует TLS сам (контейнер публикует 64738 напрямую). Источник сертификата:${c_off}"
+                echo "${c_txt} 1) acme.sh — wildcard из config/nginx/certs (пункт 13), рекомендуется${c_off}"
+                echo "${c_txt} 2) /etc/letsencrypt — certbot/другой acme-клиент${c_off}"
+                echo "${c_txt} 3) указать пути к fullchain.pem/privkey.pem вручную${c_off}"
+                echo "${c_txt} 4) аварийный self-signed (НЕ рекомендуется — клиенты увидят предупреждение)${c_off}"
                 case "$(ask "1-4" "1")" in
                     2) tls_mode="le" ;; 3) tls_mode="manual" ;; 4) tls_mode="auto" ;; *) tls_mode="acme" ;;
                 esac ;;

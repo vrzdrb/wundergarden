@@ -19,16 +19,16 @@ install_luanti() {
         [[ "$announce" == "true" ]] && announce_descr="вкл (публичный список!)"
         cat <<SUM
 
- --- Настройки Luanti ---
-  1. Папки: миры $worlds | моды $mods | игры $games
-  2. Мир: $world | игра: $game
-  3. Название сервера: $sname | MOTD: ${motd:-—}
-  4. Режим игры: $mode_descr
-  5. PvP: $(onoff "$pvp")
-  6. Мирогенерация: $mg | seed: ${seed:-случайный}
-  7. Макс. игроков: $maxusers
-  8. Публикация в списке серверов: $announce_descr
-  9. Админ (ник, все привилегии): $admin
+${c_mag} --- Настройки Luanti ---${c_off}
+  ${c_num}1.${c_off} ${c_txt}Папки: миры $worlds | моды $mods | игры $games${c_off}
+  ${c_num}2.${c_off} ${c_txt}Мир: $world | игра: $game${c_off}
+  ${c_num}3.${c_off} ${c_txt}Название сервера: $sname | MOTD: ${motd:-—}${c_off}
+  ${c_num}4.${c_off} ${c_txt}Режим игры: $mode_descr${c_off}
+  ${c_num}5.${c_off} ${c_txt}PvP: $(onoff "$pvp")${c_off}
+  ${c_num}6.${c_off} ${c_txt}Мирогенерация: $mg | seed: ${seed:-случайный}${c_off}
+  ${c_num}7.${c_off} ${c_txt}Макс. игроков: $maxusers${c_off}
+  ${c_num}8.${c_off} ${c_txt}Публикация в списке серверов: $announce_descr${c_off}
+  ${c_num}9.${c_off} ${c_txt}Админ (ник, все привилегии): $admin${c_off}
 
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
@@ -44,7 +44,7 @@ SUM
                 sname="$(ask "Название сервера" "$sname")"
                 motd="$(ask "MOTD (приветствие при входе; пусто — без него)" "$motd")" ;;
             4)
-                echo " 1) выживание  2) мирный (урона нет)  3) креатив"
+                echo "${c_txt} 1) выживание  2) мирный (урона нет)  3) креатив${c_off}"
                 case "$(ask "1/2/3" "1")" in
                     2) mode="peaceful" ;; 3) mode="creative" ;; *) mode="survival" ;;
                 esac ;;
@@ -56,7 +56,7 @@ SUM
                 local mu; mu="$(ask "Макс. игроков (число)" "$maxusers")"
                 [[ "$mu" =~ ^[0-9]+$ ]] && maxusers="$mu" || warn "нужно число — оставляю $maxusers" ;;
             8)
-                echo "Сервер появится в публичном списке servers.minetest.net — зайти сможет кто угодно."
+                echo "${c_txt}Сервер появится в публичном списке servers.minetest.net — зайти сможет кто угодно.${c_off}"
                 ask_yn "Публиковать сервер?" && announce="true" || announce="false" ;;
             9) admin="$(ask "Ник админа (в minetest.conf: name =)" "$admin")" ;;
             L|l|Д|д) logs_menu luanti ;;
@@ -107,7 +107,7 @@ EOF
         done < <(find "$mods" -maxdepth 2 -name mod.conf -printf '%h\n' 2>/dev/null | sort -u)
     fi
     if [[ ${#modlist[@]} -gt 0 ]]; then
-        echo "Найдены моды в $mods:"
+        echo "${c_txt}Найдены моды в $mods:${c_off}"
         local i sel n mname
         for i in "${!modlist[@]}"; do printf '  %d) %s\n' "$((i+1))" "${modlist[$i]}"; done
         sel="$(ask "Номера для автовключения (через запятую; пусто — ничего)" "")"

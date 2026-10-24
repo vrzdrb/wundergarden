@@ -19,12 +19,12 @@ install_excalidraw() {
         [[ "$collab" == "false" ]] && collab_descr="выкл (только личные доски)"
         cat <<SUM
 
- --- Настройки Excalidraw ---
-  1. Поддомен: https://$SUB
-  2. Доступ: $prot_descr
-  3. Live Collaboration (комнаты): $collab_descr
-  4. Папка хранения досок: $storage
-  5. Образы: ${img_front##*/} | ${img_room##*/} | ${img_storage##*/}
+${c_mag} --- Настройки Excalidraw ---${c_off}
+  ${c_num}1.${c_off} ${c_txt}Поддомен: https://$SUB${c_off}
+  ${c_num}2.${c_off} ${c_txt}Доступ: $prot_descr${c_off}
+  ${c_num}3.${c_off} ${c_txt}Live Collaboration (комнаты): $collab_descr${c_off}
+  ${c_num}4.${c_off} ${c_txt}Папка хранения досок: $storage${c_off}
+  ${c_num}5.${c_off} ${c_txt}Образы: ${img_front##*/} | ${img_room##*/} | ${img_storage##*/}${c_off}
 
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true

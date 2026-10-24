@@ -27,29 +27,29 @@ install_searxng() {
         [[ "$access" == "open" ]] && acc_desc="открытый (без защиты!)"
         cat <<SUM
 
- --- Настройки SearXNG ---
-  1. Язык интерфейса: $locale
-  2. Область поиска: $slang_label
-  3. SafeSearch: $(safe_descr "$safe")
-  4. Автокомплит: $ac
-  5. Удаление трекеров из ссылок: $(onoff "$tracker")
-  6. Редирект DOI -> sci-hub: $(onoff "$scihub")
-  7. Конвертер единиц: $(onoff "$converter")
-  8. Движки: $eng_desc
-  9. Тема: $theme / $style
- 10. Доступ: $acc_desc (JSON API отключён)
- 11. Метод запросов: $method
+${c_mag} --- Настройки SearXNG ---${c_off}
+  ${c_num}1.${c_off} ${c_txt}Язык интерфейса: $locale${c_off}
+  ${c_num}2.${c_off} ${c_txt}Область поиска: $slang_label${c_off}
+  ${c_num}3.${c_off} ${c_txt}SafeSearch: $(safe_descr "$safe")${c_off}
+  ${c_num}4.${c_off} ${c_txt}Автокомплит: $ac${c_off}
+  ${c_num}5.${c_off} ${c_txt}Удаление трекеров из ссылок: $(onoff "$tracker")${c_off}
+  ${c_num}6.${c_off} ${c_txt}Редирект DOI -> sci-hub: $(onoff "$scihub")${c_off}
+  ${c_num}7.${c_off} ${c_txt}Конвертер единиц: $(onoff "$converter")${c_off}
+  ${c_num}8.${c_off} ${c_txt}Движки: $eng_desc${c_off}
+  ${c_num}9.${c_off} ${c_txt}Тема: $theme / $style${c_off}
+ ${c_num}10.${c_off} ${c_txt}Доступ: $acc_desc (JSON API отключён)${c_off}
+ ${c_num}11.${c_off} ${c_txt}Метод запросов: $method${c_off}
 
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
         case "$c" in
             1) locale="$(ask "Язык интерфейса (код: ru/en/de/fr/...)" "$locale")" ;;
             2)
-                echo "Область поиска:"
-                echo "  auto  — глобальный поиск без привязки к региону"
-                echo "  ru    — русскоязычные результаты"
-                echo "  ru-RU — русскоязычные, приоритет России"
-                echo "  en-US / en-GB / de-DE / fr-FR / ... — приоритет конкретного региона"
+                echo "${c_txt}Область поиска:${c_off}"
+                echo "${c_txt}  auto  — глобальный поиск без привязки к региону${c_off}"
+                echo "${c_txt}  ru    — русскоязычные результаты${c_off}"
+                echo "${c_txt}  ru-RU — русскоязычные, приоритет России${c_off}"
+                echo "${c_txt}  en-US / en-GB / de-DE / fr-FR / ... — приоритет конкретного региона${c_off}"
                 slang="$(ask "Значение" "$slang")" ;;
             3) safe="$(ask "SafeSearch: 0=выкл, 1=умеренный, 2=строгий" "$safe")" ;;
             4)
@@ -57,9 +57,9 @@ SUM
                 else autocomplete="$(ask "Провайдер подсказок: duckduckgo / brave / swisscows" "duckduckgo")"; fi ;;
             5) [[ "$tracker" == "true" ]] && tracker="false" || tracker="true" ;;
             6)
-                echo "DOI — идентификатор научной статьи (10.xxxx/yyyy); официальная ссылка обычно"
-                echo "ведёт на платный доступ. sci-hub отдаёт PDF бесплатно — легально спорно,"
-                echo "ответственность за использование на вас."
+                echo "${c_txt}DOI — идентификатор научной статьи (10.xxxx/yyyy); официальная ссылка обычно${c_off}"
+                echo "${c_txt}ведёт на платный доступ. sci-hub отдаёт PDF бесплатно — легально спорно,${c_off}"
+                echo "${c_txt}ответственность за использование на вас.${c_off}"
                 if [[ "$scihub" == "true" ]]; then scihub="false"; else
                     ask_yn "Включить редирект DOI -> sci-hub?" && scihub="true" || scihub="false"
                 fi ;;
@@ -91,10 +91,10 @@ ENG
                 theme="$(ask "Тема: simple / oscar" "$theme")"
                 [[ "$theme" == "simple" ]] && style="$(ask "Стиль simple: auto / dark / light" "$style")" ;;
             10)
-                echo "Варианты доступа:"
-                echo " 1) приватный — basicauth-пароль (рекомендуется)"
-                echo " 2) публичный — для всех + антибот-limiter"
-                echo " 3) открытый — без защиты (быстро найдут боты)"
+                echo "${c_txt}Варианты доступа:${c_off}"
+                echo "${c_txt} 1) приватный — basicauth-пароль (рекомендуется)${c_off}"
+                echo "${c_txt} 2) публичный — для всех + антибот-limiter${c_off}"
+                echo "${c_txt} 3) открытый — без защиты (быстро найдут боты)${c_off}"
                 access="$(ask "1/2/3" "1")"
                 case "$access" in
                     1) access="private"
@@ -105,10 +105,10 @@ ENG
                     *) access="open"; warn "открытый инстанс без защиты — на свой риск."; update_env SEARCH_PW "" ;;
                 esac ;;
             11)
-                echo "GET — ссылки на выдачу можно пересылать и букмаркить, но запросы остаются"
-                echo "      в истории браузера и в логах сервера."
-                echo "POST — запросы не светятся в истории и реферерах, но ссылку на выдачу"
-                echo "       не сохранить и не переслать."
+                echo "${c_txt}GET — ссылки на выдачу можно пересылать и букмаркить, но запросы остаются${c_off}"
+                echo "${c_txt}      в истории браузера и в логах сервера.${c_off}"
+                echo "${c_txt}POST — запросы не светятся в истории и реферерах, но ссылку на выдачу${c_off}"
+                echo "${c_txt}       не сохранить и не переслать.${c_off}"
                 method="$(ask "GET/POST" "$method")" ;;
             L|l|Д|д) logs_menu searxng ;;
             "") break ;;

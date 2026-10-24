@@ -33,27 +33,27 @@ install_matrix() {
         [[ "$cache_mode" == "high" ]] && cache_descr="увеличенный (×2.0)"
         cat <<SUM
 
- --- Настройки continuwuity ---
-  1. Описание сервера: ${desc:-—}
-  2. Регистрация: $reg_descr${reg_token:+ (токен сохранён в .env)}${suspend_new:+; новые — заморожены до одобрения}
-  3. Сквозное шифрование (E2EE): $(onoff "$e2ee")
-  4. Суффикс имени новых юзеров: $suffix_descr
-  5. Блокировать приглашения не-админам: $(onoff "$block_invites")
-  6. Автовступление новых юзеров в комнаты: ${auto_join:-—}
-  7. Проверка анонсов (запросы к continuwuity.org): $(onoff "$ann")
-  8. Профиль кэша БД: $cache_descr
-  9. Федерация с другими серверами: $(onoff "$fed")
- 10. Онлайн-бэкапы базы (без остановки): $(onoff "$online_backup")
- 11. TURN/STUN: turn:$SUB_TURN:3478 (настроен автоматически)
+${c_mag} --- Настройки continuwuity ---${c_off}
+  ${c_num}1.${c_off} ${c_txt}Описание сервера: ${desc:-—}${c_off}
+  ${c_num}2.${c_off} ${c_txt}Регистрация: $reg_descr${reg_token:+ (токен сохранён в .env)}${suspend_new:+; новые — заморожены до одобрения}${c_off}
+  ${c_num}3.${c_off} ${c_txt}Сквозное шифрование (E2EE): $(onoff "$e2ee")${c_off}
+  ${c_num}4.${c_off} ${c_txt}Суффикс имени новых юзеров: $suffix_descr${c_off}
+  ${c_num}5.${c_off} ${c_txt}Блокировать приглашения не-админам: $(onoff "$block_invites")${c_off}
+  ${c_num}6.${c_off} ${c_txt}Автовступление новых юзеров в комнаты: ${auto_join:-—}${c_off}
+  ${c_num}7.${c_off} ${c_txt}Проверка анонсов (запросы к continuwuity.org): $(onoff "$ann")${c_off}
+  ${c_num}8.${c_off} ${c_txt}Профиль кэша БД: $cache_descr${c_off}
+  ${c_num}9.${c_off} ${c_txt}Федерация с другими серверами: $(onoff "$fed")${c_off}
+ ${c_num}10.${c_off} ${c_txt}Онлайн-бэкапы базы (без остановки): $(onoff "$online_backup")${c_off}
+ ${c_num}11.${c_off} ${c_txt}TURN/STUN: turn:$SUB_TURN:3478 (настроен автоматически)${c_off}
 
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
         case "$c" in
             1) desc="$(ask "Описание (видно в клиентах; пусто — без описания)" "$desc")" ;;
             2)
-                echo " 1) закрыта — только вы сами (первый юзер — админ)"
-                echo " 2) по токену — друзья регистрируются по секретному токену"
-                echo " 3) открыта — любой, кто найдёт сервер"
+                echo "${c_txt} 1) закрыта — только вы сами (первый юзер — админ)${c_off}"
+                echo "${c_txt} 2) по токену — друзья регистрируются по секретному токену${c_off}"
+                echo "${c_txt} 3) открыта — любой, кто найдёт сервер${c_off}"
                 reg_mode="$(ask "1/2/3" "$([[ -n "$reg_token" ]] && echo 2 || echo 1)")"
                 case "$reg_mode" in
                     2) reg_mode="token"
@@ -65,11 +65,11 @@ SUM
                     *) reg_mode="closed"; reg_token=""; update_env REGISTRATION_TOKEN "" ;;
                 esac ;;
             3)
-                echo "E2EE — сквозное шифрование комнат (ключи только у участников)."
-                echo "Выкл.: сервер видит всё, но упрощает поиск/бэкапы. Обычно оставляют вкл."
+                echo "${c_txt}E2EE — сквозное шифрование комнат (ключи только у участников).${c_off}"
+                echo "${c_txt}Выкл.: сервер видит всё, но упрощает поиск/бэкапы. Обычно оставляют вкл.${c_off}"
                 ask_yn "Оставить E2EE включённым?" && e2ee="true" || e2ee="false" ;;
             4)
-                echo " 1) флаг 🏳️‍⚧️ (дефолт continuwuity)  2) без суффикса  3) свой текст"
+                echo "${c_txt} 1) флаг 🏳️‍⚧️ (дефолт continuwuity)  2) без суффикса  3) свой текст${c_off}"
                 local sc; sc="$(ask "1/2/3" "1")"
                 case "$sc" in
                     2) suffix_mode="none" ;;
@@ -80,11 +80,11 @@ SUM
             6) auto_join="$(ask "Алиасы комнат через запятую (#общая:$SUB_MATRIX, ...); пусто — выкл" "$auto_join")" ;;
             7) [[ "$ann" == "true" ]] && ann="false" || ann="true" ;;
             8)
-                echo " 1) по умолчанию  2) экономный (×0.5 — мало RAM)  3) увеличенный (×2.0 — запас памяти)"
+                echo "${c_txt} 1) по умолчанию  2) экономный (×0.5 — мало RAM)  3) увеличенный (×2.0 — запас памяти)${c_off}"
                 cache_mode="$(ask "1/2/3" "1")"; [[ "$cache_mode" == "1" ]] && cache_mode="default" ;;
             9)
-                echo "Федерация: общение с юзерами других серверов. Требует: .well-known,"
-                echo "порт 8448 (или 443), постоянную модерацию. Для сервера на двоих — не нужна."
+                echo "${c_txt}Федерация: общение с юзерами других серверов. Требует: .well-known,${c_off}"
+                echo "${c_txt}порт 8448 (или 443), постоянную модерацию. Для сервера на двоих — не нужна.${c_off}"
                 ask_yn "Включить федерацию?" && fed="true" || fed="false" ;;
             10) [[ "$online_backup" == "true" ]] && online_backup="false" || online_backup="true" ;;
             11) log "TURN: turn:$SUB_TURN:3478 (udp+tcp), shared-secret, TTL 86400. Меняется только через повтор пункта 5." ;;

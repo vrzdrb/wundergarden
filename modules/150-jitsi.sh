@@ -35,11 +35,11 @@ install_jitsi() {
     done
     pub_ip="$(ask "Публичный IP (JVB_ADVERTISE_IPS)" "${PUBLIC_IP:-}")"
     [[ -z "$pub_ip" ]] && { warn "IP обязателен"; return 1; }
-    echo "Режим веба: 1) за нашим nginx (TLS нашим wildcard; порт хоста 127.0.0.1:7443, рекомендуется)"
-    echo "            2) прямой HTTPS своим сертификатом (80+443 на этом хосте)"
+    echo "${c_txt}Режим веба: 1) за нашим nginx (TLS нашим wildcard; порт хоста 127.0.0.1:7443, рекомендуется)${c_off}"
+    echo "${c_txt}            2) прямой HTTPS своим сертификатом (80+443 на этом хосте)${c_off}"
     mode="$(ask "1/2" "1")"
-    echo "TURN: 1) наш существующий coturn (пункт 6; общий секрет с Matrix — нормально)"
-    echo "     2) собственный coturn этого скрипта (host-network, 3478)"
+    echo "${c_txt}TURN: 1) наш существующий coturn (пункт 6; общий секрет с Matrix — нормально)${c_off}"
+    echo "${c_txt}     2) собственный coturn этого скрипта (host-network, 3478)${c_off}"
     turn_src="$(ask "1/2" "1")"
     [[ "$turn_src" == "1" && -z "${SUB_TURN:-}" && -z "${TURN_PASSWORD:-}" ]] && \
         warn "наш coturn ещё не установлен — сначала пункт 6 (Matrix), либо выберите '2'."
@@ -179,16 +179,16 @@ jitsi_toggle_udp() { # 3478: tcp+udp ИЛИ только tcp
 
 jitsi_menu() {
     while true; do
-        cat <<'SUM'
+        cat <<SUM
 
- --- Jitsi Meet ---
-  1. Установка / переустановка
-  2. Включить JWT-аутентификацию (комнаты только по токену)
-  3. 3478: переключить TCP+UDP / только TCP
-  4. Пересоздать и перезапустить контейнеры
-  5. Запустить token-сервер (выдача токенов)
-  6. Выдать токен для комнаты
-  7. Остановить token-сервер
+${c_mag} --- Jitsi Meet ---${c_off}
+  ${c_num}1.${c_off} ${c_txt}Установка / переустановка${c_off}
+  ${c_num}2.${c_off} ${c_txt}Включить JWT-аутентификацию (комнаты только по токену)${c_off}
+  ${c_num}3.${c_off} ${c_txt}3478: переключить TCP+UDP / только TCP${c_off}
+  ${c_num}4.${c_off} ${c_txt}Пересоздать и перезапустить контейнеры${c_off}
+  ${c_num}5.${c_off} ${c_txt}Запустить token-сервер (выдача токенов)${c_off}
+  ${c_num}6.${c_off} ${c_txt}Выдать токен для комнаты${c_off}
+  ${c_num}7.${c_off} ${c_txt}Остановить token-сервер${c_off}
 
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true

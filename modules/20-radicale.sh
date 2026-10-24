@@ -13,12 +13,12 @@ install_radicale() {
     while true; do
         cat <<SUM
 
- --- Настройки Radicale ---
-  1. Поддомен: https://$SUB_CAL
-  2. Авторизация: ${auth_type/htpasswd/логин и пароль (htpasswd)}${auth_type/none/БЕЗ пароля (!)}
-  3. Пользователь: ${ruser:-—}
-  4. Права: $rights
-  5. Логирование: $level
+${c_mag} --- Настройки Radicale ---${c_off}
+  ${c_num}1.${c_off} ${c_txt}Поддомен: https://$SUB_CAL${c_off}
+  ${c_num}2.${c_off} ${c_txt}Авторизация: ${auth_type/htpasswd/логин и пароль (htpasswd)}${auth_type/none/БЕЗ пароля (!)}${c_off}
+  ${c_num}3.${c_off} ${c_txt}Пользователь: ${ruser:-—}${c_off}
+  ${c_num}4.${c_off} ${c_txt}Права: $rights${c_off}
+  ${c_num}5.${c_off} ${c_txt}Логирование: $level${c_off}
 
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
@@ -27,8 +27,8 @@ SUM
                 SUB_CAL="$(ask "Поддомен" "$SUB_CAL")"
                 update_env SUB_CAL "$SUB_CAL"; dns_hint "$SUB_CAL" ;;
             2)
-                echo " 1) htpasswd — логин/пароль (рекомендуется)"
-                echo " 2) none — без авторизации (только в паре с basicauth в nginx; сам скрипт его не ставит!)"
+                echo "${c_txt} 1) htpasswd — логин/пароль (рекомендуется)${c_off}"
+                echo "${c_txt} 2) none — без авторизации (только в паре с basicauth в nginx; сам скрипт его не ставит!)${c_off}"
                 case "$(ask "1/2" "1")" in
                     2) auth_type="none"; warn "тип 'none' небезопасен без доп. basicauth — вы уверены, что хотите открытый доступ?" ;;
                     *) auth_type="htpasswd" ;;
@@ -46,8 +46,8 @@ SUM
                 log "Пользователь '$u' записан в config/radicale/users (apr1/md5). Пароль: $p"
                 warn "добавить ещё пользователей позже: openssl passwd -apr1 >> config/radicale/users" ;;
             4)
-                echo " owner_only — каждый видит только свои календари (рекомендуется)"
-                echo " authenticated — любой залогиненный видит всё"
+                echo "${c_txt} owner_only — каждый видит только свои календари (рекомендуется)${c_off}"
+                echo "${c_txt} authenticated — любой залогиненный видит всё${c_off}"
                 rights="$(ask "owner_only / authenticated" "$rights")" ;;
             5) level="$(ask "INFO / DEBUG / WARNING" "$level")" ;;
             L|l|Д|д) logs_menu radicale ;;

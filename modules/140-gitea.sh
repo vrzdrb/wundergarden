@@ -12,12 +12,12 @@ install_gitea() {
     while true; do
         cat <<SUM
 
- --- Настройки Gitea ---
-  1. Поддомен: https://$SUB
-  2. Харденинг (включён всегда): регистрация закрыта, REQUIRE_SIGNIN_VIEW, INSTALL_LOCK,
+${c_mag} --- Настройки Gitea ---${c_off}
+  ${c_num}1.${c_off} ${c_txt}Поддомен: https://$SUB${c_off}
+  ${c_num}2.${c_off} ${c_txt}Харденинг (включён всегда): регистрация закрыта, REQUIRE_SIGNIN_VIEW, INSTALL_LOCK,${c_off}
      SSH выключен, LFS выключен, OpenID выключен, организации приватные
-  3. Git push/pull без лимитов (nginx client_max_body_size = 0)
-  4. Первый админ (создаётся через CLI при установке; регистрация закрыта)
+  ${c_num}3.${c_off} ${c_txt}Git push/pull без лимитов (nginx client_max_body_size = 0)${c_off}
+  ${c_num}4.${c_off} ${c_txt}Первый админ (создаётся через CLI при установке; регистрация закрыта)${c_off}
 
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true

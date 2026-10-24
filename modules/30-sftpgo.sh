@@ -20,13 +20,13 @@ install_sftpgo() {
         [[ "$webdav" == "true" ]] && webdav_descr="https://$SUB_WEBDAV"
         cat <<SUM
 
- --- Настройки SFTPGo ---
-  1. Папка данных (eMMC): $sftpdata
-  2. Веб-клиент: https://$SUB_FILES
-  3. Админ: $admin_user (пароль в .env)
-  4. Пользователь облака: $cloud_descr
-  5. SFTP наружу (2022/tcp): $sftp_descr
-  6. WebDAV через nginx: $webdav_descr
+${c_mag} --- Настройки SFTPGo ---${c_off}
+  ${c_num}1.${c_off} ${c_txt}Папка данных (eMMC): $sftpdata${c_off}
+  ${c_num}2.${c_off} ${c_txt}Веб-клиент: https://$SUB_FILES${c_off}
+  ${c_num}3.${c_off} ${c_txt}Админ: $admin_user (пароль в .env)${c_off}
+  ${c_num}4.${c_off} ${c_txt}Пользователь облака: $cloud_descr${c_off}
+  ${c_num}5.${c_off} ${c_txt}SFTP наружу (2022/tcp): $sftp_descr${c_off}
+  ${c_num}6.${c_off} ${c_txt}WebDAV через nginx: $webdav_descr${c_off}
   БД: MariaDB (контейнер sftpgo-db); sqlite/postgres — только вручную через env.
   Внимание: пользователи/настройки из старой sqlite-установки автоматически НЕ переезжают.
 

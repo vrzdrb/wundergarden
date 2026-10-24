@@ -16,12 +16,12 @@ install_etherpad() {
         [[ "$req_session" == "true" ]] && sess_descr="вкл (только авторизованные)"
         cat <<SUM
 
- --- Настройки Etherpad ---
-  1. Поддомен: https://$SUB
-  2. Название: $title
-  3. Текст нового пада: ${padtext:0:60}...
-  4. Доступ: $prot_descr
-  5. requireSession: $sess_descr
+${c_mag} --- Настройки Etherpad ---${c_off}
+  ${c_num}1.${c_off} ${c_txt}Поддомен: https://$SUB${c_off}
+  ${c_num}2.${c_off} ${c_txt}Название: $title${c_off}
+  ${c_num}3.${c_off} ${c_txt}Текст нового пада: ${padtext:0:60}...${c_off}
+  ${c_num}4.${c_off} ${c_txt}Доступ: $prot_descr${c_off}
+  ${c_num}5.${c_off} ${c_txt}requireSession: $sess_descr${c_off}
   БД: MariaDB (контейнер etherpad-db). Пады из старого dirty.db автоматически НЕ переезжают.
 
 SUM

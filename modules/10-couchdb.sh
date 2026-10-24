@@ -17,12 +17,12 @@ install_couchdb() {
         [[ "$fresh" == "true" ]] && pass_descr="будет сгенерирован (или задайте в пункте 2)"
         cat <<SUM
 
- --- Настройки CouchDB ---
-  1. Поддомен: https://$SUB_OBSIDIAN
-  2. Учётка: $COUCHDB_USER / $pass_descr
-  3. База заметок: $dbname
-  4. Лимиты: документ ${maxdoc} МБ | HTTP-запрос ${maxreq} МБ
-  5. Доп. CORS-origins: ${cors_extra:-—}
+${c_mag} --- Настройки CouchDB ---${c_off}
+  ${c_num}1.${c_off} ${c_txt}Поддомен: https://$SUB_OBSIDIAN${c_off}
+  ${c_num}2.${c_off} ${c_txt}Учётка: $COUCHDB_USER / $pass_descr${c_off}
+  ${c_num}3.${c_off} ${c_txt}База заметок: $dbname${c_off}
+  ${c_num}4.${c_off} ${c_txt}Лимиты: документ ${maxdoc} МБ | HTTP-запрос ${maxreq} МБ${c_off}
+  ${c_num}5.${c_off} ${c_txt}Доп. CORS-origins: ${cors_extra:-—}${c_off}
 
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true

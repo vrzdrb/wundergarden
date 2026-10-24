@@ -19,14 +19,14 @@ install_classquiz() {
         [[ "$protected" == "false" ]] && cq_prot_descr="открытый (регистрация для всех!)"
         cat <<SUM
 
- --- Настройки ClassQuiz ---
-  1. Поддомен: https://$SUB
-  2. Secret key: задан (в .env)
-  3. Пропуск верификации email: $se_descr
-  4. Папка загрузок (картинки викторин): $uploads
-  5. Образы: ${img_api##*/} | ${img_front##*/}
-  6. Лимит RAM Meilisearch: ${meili_mem} МБ
-  7. Доступ: $cq_prot_descr
+${c_mag} --- Настройки ClassQuiz ---${c_off}
+  ${c_num}1.${c_off} ${c_txt}Поддомен: https://$SUB${c_off}
+  ${c_num}2.${c_off} ${c_txt}Secret key: задан (в .env)${c_off}
+  ${c_num}3.${c_off} ${c_txt}Пропуск верификации email: $se_descr${c_off}
+  ${c_num}4.${c_off} ${c_txt}Папка загрузок (картинки викторин): $uploads${c_off}
+  ${c_num}5.${c_off} ${c_txt}Образы: ${img_api##*/} | ${img_front##*/}${c_off}
+  ${c_num}6.${c_off} ${c_txt}Лимит RAM Meilisearch: ${meili_mem} МБ${c_off}
+  ${c_num}7.${c_off} ${c_txt}Доступ: $cq_prot_descr${c_off}
   Примечание: PostgreSQL и Valkey — требование архитектуры ClassQuiz (не MySQL-совместимо).
 
 SUM
@@ -40,8 +40,8 @@ SUM
                 img_api="$(ask "Образ backend" "$img_api")"
                 img_front="$(ask "Образ frontend" "$img_front")" ;;
             6)
-                echo "Meilisearch держит поисковый индекс викторин в RAM."
-                echo "Минимум ~128 МБ (пара-тройка викторин); рекомендуется 256–512 МБ."
+                echo "${c_txt}Meilisearch держит поисковый индекс викторин в RAM.${c_off}"
+                echo "${c_txt}Минимум ~128 МБ (пара-тройка викторин); рекомендуется 256–512 МБ.${c_off}"
                 local mm; mm="$(ask "Лимит, МБ (мин. 64)" "$meili_mem")"
                 [[ "$mm" =~ ^[0-9]+$ && "$mm" -ge 64 ]] && meili_mem="$mm" || warn "нужно число >= 64 — оставляю $meili_mem" ;;
             7)

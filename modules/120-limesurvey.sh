@@ -15,12 +15,12 @@ install_limesurvey() {
     while true; do
         cat <<SUM
 
- --- Настройки LimeSurvey ---
-  1. Поддомен: https://$SUB
-  2. База данных: $([ "$dbtype" == "pgsql" ] && echo PostgreSQL || echo MariaDB/MySQL)
-  3. Админ: $admin_user ($admin_name), пароль: задан (в .env)
-  4. Папка uploads: $uploads
-  5. Образы: ${img##*/} | ${img_db##*/}
+${c_mag} --- Настройки LimeSurvey ---${c_off}
+  ${c_num}1.${c_off} ${c_txt}Поддомен: https://$SUB${c_off}
+  ${c_num}2.${c_off} ${c_txt}База данных: $([ "$dbtype" == "pgsql" ] && echo PostgreSQL || echo MariaDB/MySQL)${c_off}
+  ${c_num}3.${c_off} ${c_txt}Админ: $admin_user ($admin_name), пароль: задан (в .env)${c_off}
+  ${c_num}4.${c_off} ${c_txt}Папка uploads: $uploads${c_off}
+  ${c_num}5.${c_off} ${c_txt}Образы: ${img##*/} | ${img_db##*/}${c_off}
   Примечание: для удалённого VPS тот же скрипт — просто запустите его там.
 
 SUM
@@ -28,8 +28,8 @@ SUM
         case "$c" in
             1) SUB="$(ask "Поддомен" "$SUB")"; update_env SUB_LIMESURVEY "$SUB"; dns_hint "$SUB" ;;
             2)
-                echo " 1) MariaDB/MySQL — рекомендуется, лучше всего протестирована LimeSurvey"
-                echo " 2) PostgreSQL — поддерживается"
+                echo "${c_txt} 1) MariaDB/MySQL — рекомендуется, лучше всего протестирована LimeSurvey${c_off}"
+                echo "${c_txt} 2) PostgreSQL — поддерживается${c_off}"
                 case "$(ask "1/2" "1")" in
                     2) dbtype="pgsql"; img_db="postgres:16-alpine" ;;
                     *) dbtype="mysql"; img_db="mariadb:11" ;;
