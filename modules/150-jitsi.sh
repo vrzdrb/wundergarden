@@ -170,6 +170,8 @@ jitsi_toggle_udp() {
 
 jitsi_menu() {
     while true; do
+        clear
+        clear
         cat <<SUM
 
 ${c_mag} --- Jitsi Meet ---${c_off}

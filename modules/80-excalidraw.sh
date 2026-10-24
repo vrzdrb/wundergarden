@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# modules/80-excalidraw.sh — сервис: excalidraw
-# Загружается wundergarden.sh; использует общие хелперы основного скрипта.
 
 install_excalidraw() {
     ensure_prepared
@@ -17,15 +15,18 @@ install_excalidraw() {
         local prot_descr="по паролю (basicauth)" collab_descr="вкл"
         [[ "$protected" == "false" ]] && prot_descr="открытый (любой по ссылке)"
         [[ "$collab" == "false" ]] && collab_descr="выкл (только личные доски)"
+        clear
         cat <<SUM
 
 ${c_mag} --- Настройки Excalidraw ---${c_off}
   ${c_num}1.${c_off} ${c_txt}Поддомен: https://$SUB${c_off}
   ${c_num}2.${c_off} ${c_txt}Доступ: $prot_descr${c_off}
-  ${c_num}3.${c_off} ${c_txt}Live Collaboration (комнаты): $collab_descr${c_off}
+  ${c_num}3.${c_off} ${c_txt}Live Collaboration: $collab_descr${c_off}
   ${c_num}4.${c_off} ${c_txt}Папка хранения досок: $storage${c_off}
   ${c_num}5.${c_off} ${c_txt}Образы: ${img_front##*/} | ${img_room##*/} | ${img_storage##*/}${c_off}
 
+ ${c_num}6.${c_off} ${c_txt}Логи${c_off}
+  ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
         case "$c" in
@@ -47,8 +48,8 @@ SUM
                 img_front="$(ask "Образ frontend (форк alswl)" "$img_front")"
                 img_room="$(ask "Образ room-сервера (пин версии, см. README alswl)" "$img_room")"
                 img_storage="$(ask "Образ storage backend" "$img_storage")" ;;
-            L|l|Д|д) logs_menu excalidraw excalidraw-room excalidraw-storage ;;
-            "") break ;;
+            6) logs_menu excalidraw excalidraw-room excalidraw-storage  ;;
+            0) break ;;
             *) warn "нет такого пункта" ;;
         esac
     done

@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# modules/60-luanti.sh — сервис: luanti
-# Загружается wundergarden.sh; использует общие хелперы основного скрипта.
 
 install_luanti() {
     ensure_prepared
@@ -17,6 +15,7 @@ install_luanti() {
         [[ "$mode" == "peaceful" ]] && mode_descr="мирный (без урона)"
         [[ "$mode" == "creative" ]] && mode_descr="креатив"
         [[ "$announce" == "true" ]] && announce_descr="вкл (публичный список!)"
+        clear
         cat <<SUM
 
 ${c_mag} --- Настройки Luanti ---${c_off}
@@ -24,12 +23,13 @@ ${c_mag} --- Настройки Luanti ---${c_off}
   ${c_num}2.${c_off} ${c_txt}Мир: $world | игра: $game${c_off}
   ${c_num}3.${c_off} ${c_txt}Название сервера: $sname | MOTD: ${motd:-—}${c_off}
   ${c_num}4.${c_off} ${c_txt}Режим игры: $mode_descr${c_off}
-  ${c_num}5.${c_off} ${c_txt}PvP: $(onoff "$pvp")${c_off}
+  ${c_num}5.${c_off} ${c_txt}PvP: $${c_off}
   ${c_num}6.${c_off} ${c_txt}Мирогенерация: $mg | seed: ${seed:-случайный}${c_off}
   ${c_num}7.${c_off} ${c_txt}Макс. игроков: $maxusers${c_off}
   ${c_num}8.${c_off} ${c_txt}Публикация в списке серверов: $announce_descr${c_off}
-  ${c_num}9.${c_off} ${c_txt}Админ (ник, все привилегии): $admin${c_off}
+  ${c_num}9.${c_off} ${c_txt}Админ: $admin${c_off}
 
+  ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
         case "$c" in
@@ -59,8 +59,8 @@ SUM
                 echo "${c_txt}Сервер появится в публичном списке servers.minetest.net — зайти сможет кто угодно.${c_off}"
                 ask_yn "Публиковать сервер?" && announce="true" || announce="false" ;;
             9) admin="$(ask "Ник админа (в minetest.conf: name =)" "$admin")" ;;
-            L|l|Д|д) logs_menu luanti ;;
-            "") break ;;
+            10) logs_menu luanti  ;;
+            0) break ;;
             *) warn "нет такого пункта" ;;
         esac
     done
@@ -69,7 +69,6 @@ SUM
     chown -R 1000:1000 "$worlds" "$mods" "$games" "$CONFIG_ROOT/data/luanti/config" 2>/dev/null || true
     update_env LUANTI_WORLDS "$worlds"; update_env LUANTI_MODS "$mods"; update_env LUANTI_GAMES "$games"
 
-    # --- minetest.conf ---
     local conf="$CONFIG_ROOT/data/luanti/config/minetest.conf"
     cat > "$conf" <<EOF
 server_name = $sname
@@ -88,7 +87,6 @@ EOF
     [[ -n "$motd" ]] && echo "motd = $motd" >> "$conf"
     [[ -n "$seed" ]] && echo "fixed_map_seed = $seed" >> "$conf"
 
-    # --- world.mt для нового мира (игра + backend); существующий мир не трогаем
     local wdir="$worlds/$world" wmt="$wdir/world.mt"
     if [[ ! -f "$wmt" ]]; then
         mkdir -p "$wdir"
@@ -98,7 +96,6 @@ EOF
         log "Мир '$world' уже существует — world.mt не тронут (игра и seed берутся из него)."
     fi
 
-    # --- автовключение модов из папки ---
     local -a modlist=()
     if [[ -d "$mods" ]]; then
         while IFS= read -r d; do

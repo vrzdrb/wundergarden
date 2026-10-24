@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# modules/90-etherpad.sh — сервис: etherpad
-# Загружается wundergarden.sh; использует общие хелперы основного скрипта.
 
 install_etherpad() {
     ensure_prepared
@@ -14,6 +12,7 @@ install_etherpad() {
         local prot_descr="открытый (любой по ссылке)" sess_descr="выкл"
         [[ "$protected" == "true" ]] && prot_descr="по паролю (basicauth)"
         [[ "$req_session" == "true" ]] && sess_descr="вкл (только авторизованные)"
+        clear
         cat <<SUM
 
 ${c_mag} --- Настройки Etherpad ---${c_off}
@@ -22,8 +21,10 @@ ${c_mag} --- Настройки Etherpad ---${c_off}
   ${c_num}3.${c_off} ${c_txt}Текст нового пада: ${padtext:0:60}...${c_off}
   ${c_num}4.${c_off} ${c_txt}Доступ: $prot_descr${c_off}
   ${c_num}5.${c_off} ${c_txt}requireSession: $sess_descr${c_off}
-  БД: MariaDB (контейнер etherpad-db). Пады из старого dirty.db автоматически НЕ переезжают.
+  БД: MariaDB. Пады из старого dirty.db автоматически НЕ переезжают.
 
+ ${c_num}6.${c_off} ${c_txt}Логи${c_off}
+  ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
         case "$c" in
@@ -42,14 +43,13 @@ SUM
                     done
                 fi ;;
             5) [[ "$req_session" == "true" ]] && req_session="false" || req_session="true" ;;
-            L|l|Д|д) logs_menu etherpad etherpad-db ;;
-            "") break ;;
+            6) logs_menu etherpad etherpad-db  ;;
+            0) break ;;
             *) warn "нет такого пункта" ;;
         esac
     done
     update_env SUB_ETHERPAD "$SUB"
 
-    # JSON-безопасность вводимых строк
     if forbidden_json "$title" || forbidden_json "$padtext"; then
         die "название и текст пада не должны содержать кавычки или обратный слеш (JSON)"
     fi

@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# modules/30-sftpgo.sh — сервис: sftpgo
-# Загружается wundergarden.sh; использует общие хелперы основного скрипта.
 
 install_sftpgo() {
     ensure_prepared
@@ -18,18 +16,21 @@ install_sftpgo() {
         [[ -n "$cloud_user" ]] && cloud_descr="$cloud_user (квота ${cloud_quota} МБ)"
         [[ "$sftp_ext" == "true" ]] && sftp_descr="вкл (0.0.0.0:2022)"
         [[ "$webdav" == "true" ]] && webdav_descr="https://$SUB_WEBDAV"
+        clear
         cat <<SUM
 
 ${c_mag} --- Настройки SFTPGo ---${c_off}
-  ${c_num}1.${c_off} ${c_txt}Папка данных (eMMC): $sftpdata${c_off}
+  ${c_num}1.${c_off} ${c_txt}Папка данных: $sftpdata${c_off}
   ${c_num}2.${c_off} ${c_txt}Веб-клиент: https://$SUB_FILES${c_off}
-  ${c_num}3.${c_off} ${c_txt}Админ: $admin_user (пароль в .env)${c_off}
+  ${c_num}3.${c_off} ${c_txt}Админ: $admin_user${c_off}
   ${c_num}4.${c_off} ${c_txt}Пользователь облака: $cloud_descr${c_off}
-  ${c_num}5.${c_off} ${c_txt}SFTP наружу (2022/tcp): $sftp_descr${c_off}
+  ${c_num}5.${c_off} ${c_txt}SFTP наружу: $sftp_descr${c_off}
   ${c_num}6.${c_off} ${c_txt}WebDAV через nginx: $webdav_descr${c_off}
-  БД: MariaDB (контейнер sftpgo-db); sqlite/postgres — только вручную через env.
+  БД: MariaDB; sqlite/postgres — только вручную через env.
   Внимание: пользователи/настройки из старой sqlite-установки автоматически НЕ переезжают.
 
+ ${c_num}7.${c_off} ${c_txt}Логи${c_off}
+  ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
         case "$c" in
@@ -66,8 +67,8 @@ SUM
                     SUB_WEBDAV="$(ask "Поддомен WebDAV" "$SUB_WEBDAV")"; update_env SUB_WEBDAV "$SUB_WEBDAV"
                     dns_hint "$SUB_WEBDAV"
                 fi ;;
-            L|l|Д|д) logs_menu sftpgo sftpgo-db ;;
-            "") break ;;
+            7) logs_menu sftpgo sftpgo-db  ;;
+            0) break ;;
             *) warn "нет такого пункта" ;;
         esac
     done
@@ -80,7 +81,6 @@ SUM
     docker compose up -d sftpgo
     sleep 4
 
-    # --- создание пользователя облака через API ---
     if [[ -n "$cloud_user" ]]; then
         local code
         code=$(curl -s -o /dev/null -w '%{http_code}' -u "$admin_user:$SFTPGO_ADMIN_PASSWORD" -X POST \

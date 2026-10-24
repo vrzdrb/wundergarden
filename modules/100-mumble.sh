@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# modules/100-mumble.sh — сервис: mumble
-# Загружается wundergarden.sh; использует общие хелперы основного скрипта.
 
 install_mumble() {
     ensure_prepared
@@ -20,11 +18,12 @@ install_mumble() {
             manual) tls_descr="свой путь" ;;
             auto) tls_descr="АВАРИЙНЫЙ self-signed" ;;
         esac
+        clear
         cat <<SUM
 
-${c_mag} --- Настройки Mumble (Murmur) ---${c_off}
+${c_mag} --- Настройки Mumble ---${c_off}
   ${c_num}1.${c_off} ${c_txt}Пароль сервера: $pw_descr${c_off}
-  ${c_num}2.${c_off} ${c_txt}SuperUser-пароль: задан (в .env, при желании перегенерируйте)${c_off}
+  ${c_num}2.${c_off} ${c_txt}SuperUser-пароль: задан${c_off}
   ${c_num}3.${c_off} ${c_txt}Приветствие: $welcome${c_off}
   ${c_num}4.${c_off} ${c_txt}Битрейт на пользователя: $bw бит/с${c_off}
   ${c_num}5.${c_off} ${c_txt}Лимит пользователей: $users${c_off}
@@ -32,6 +31,7 @@ ${c_mag} --- Настройки Mumble (Murmur) ---${c_off}
   ${c_num}7.${c_off} ${c_txt}Образ: $img${c_off}
   ${c_num}8.${c_off} ${c_txt}TLS-сертификат: $tls_descr${c_off}
 
+  ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
         case "$c" in
@@ -57,8 +57,8 @@ SUM
                 case "$(ask "1-4" "1")" in
                     2) tls_mode="le" ;; 3) tls_mode="manual" ;; 4) tls_mode="auto" ;; *) tls_mode="acme" ;;
                 esac ;;
-            L|l|Д|д) logs_menu mumble ;;
-            "") break ;;
+            9) logs_menu mumble  ;;
+            0) break ;;
             *) warn "нет такого пункта" ;;
         esac
     done
@@ -70,7 +70,6 @@ SUM
     update_env MUMBLE_SUGGEST_PTT "$ptt"; update_env MUMBLE_IMAGE "$img"
     update_env MUMBLE_TLS_MODE "$tls_mode"
 
-    # --- TLS-сертификат для Mumble (копируется в config/mumble, контейнер монтирует /cert) ---
     mkdir -p "$CONFIG_ROOT/config/mumble"
     if [[ "$tls_mode" == "acme" ]]; then
         local cdir="$CONFIG_ROOT/config/nginx/certs"

@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# modules/50-matrix.sh — сервис: matrix
-# Загружается wundergarden.sh; использует общие хелперы основного скрипта.
 
 install_matrix() {
     ensure_prepared
@@ -18,7 +16,6 @@ install_matrix() {
     done
     update_env PUBLIC_IP "$pub_ip"
 
-    # --- значения по умолчанию ---
     local desc="" reg_mode="closed" reg_token="${REGISTRATION_TOKEN:-}" suspend_new="false" \
           e2ee="true" suffix_mode="flag" suffix_custom="" block_invites="false" \
           auto_join="" ann="false" cache_mode="default" fed="false" online_backup="true"
@@ -31,21 +28,23 @@ install_matrix() {
         [[ "$suffix_mode" == "custom" ]] && suffix_descr="\"$suffix_custom\""
         [[ "$cache_mode" == "low" ]] && cache_descr="экономный (×0.5)"
         [[ "$cache_mode" == "high" ]] && cache_descr="увеличенный (×2.0)"
+        clear
         cat <<SUM
 
 ${c_mag} --- Настройки continuwuity ---${c_off}
   ${c_num}1.${c_off} ${c_txt}Описание сервера: ${desc:-—}${c_off}
-  ${c_num}2.${c_off} ${c_txt}Регистрация: $reg_descr${reg_token:+ (токен сохранён в .env)}${suspend_new:+; новые — заморожены до одобрения}${c_off}
-  ${c_num}3.${c_off} ${c_txt}Сквозное шифрование (E2EE): $(onoff "$e2ee")${c_off}
+  ${c_num}2.${c_off} ${c_txt}Регистрация: $reg_descr${reg_token:+}${suspend_new:+; новые — заморожены до одобрения}${c_off}
+  ${c_num}3.${c_off} ${c_txt}Сквозное шифрование: $${c_off}
   ${c_num}4.${c_off} ${c_txt}Суффикс имени новых юзеров: $suffix_descr${c_off}
-  ${c_num}5.${c_off} ${c_txt}Блокировать приглашения не-админам: $(onoff "$block_invites")${c_off}
+  ${c_num}5.${c_off} ${c_txt}Блокировать приглашения не-админам: $${c_off}
   ${c_num}6.${c_off} ${c_txt}Автовступление новых юзеров в комнаты: ${auto_join:-—}${c_off}
-  ${c_num}7.${c_off} ${c_txt}Проверка анонсов (запросы к continuwuity.org): $(onoff "$ann")${c_off}
+  ${c_num}7.${c_off} ${c_txt}Проверка анонсов: $${c_off}
   ${c_num}8.${c_off} ${c_txt}Профиль кэша БД: $cache_descr${c_off}
-  ${c_num}9.${c_off} ${c_txt}Федерация с другими серверами: $(onoff "$fed")${c_off}
- ${c_num}10.${c_off} ${c_txt}Онлайн-бэкапы базы (без остановки): $(onoff "$online_backup")${c_off}
- ${c_num}11.${c_off} ${c_txt}TURN/STUN: turn:$SUB_TURN:3478 (настроен автоматически)${c_off}
+  ${c_num}9.${c_off} ${c_txt}Федерация с другими серверами: $${c_off}
+ ${c_num}10.${c_off} ${c_txt}Онлайн-бэкапы базы: $${c_off}
+ ${c_num}11.${c_off} ${c_txt}TURN/STUN: turn:$SUB_TURN:3478${c_off}
 
+  ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
         case "$c" in
@@ -88,19 +87,17 @@ SUM
                 ask_yn "Включить федерацию?" && fed="true" || fed="false" ;;
             10) [[ "$online_backup" == "true" ]] && online_backup="false" || online_backup="true" ;;
             11) log "TURN: turn:$SUB_TURN:3478 (udp+tcp), shared-secret, TTL 86400. Меняется только через повтор пункта 5." ;;
-            L|l|Д|д) logs_menu matrix coturn ;;
-            "") break ;;
+            12) logs_menu matrix coturn  ;;
+            0) break ;;
             *) warn "нет такого пункта" ;;
         esac
     done
 
-    # --- если docker раньше создал директории-заглушки вместо файлов конфигов — убираем
     for f in "$CONFIG_ROOT/config/matrix/continuwuity.toml" "$DATA_DIR/coturn/turnserver.conf"; do
         [[ -d "$f" ]] && { warn "убираю директорию-заглушку $f"; rm -rf "$f"; }
     done
     mkdir -p "$DATA_DIR/matrix" "$DATA_DIR/matrix-backups" "$DATA_DIR/coturn" "$CONFIG_ROOT/config/matrix"
 
-    # --- дополнительные блоки toml ---
     local suffix_value='"🏳️‍⚧️"'
     [[ "$suffix_mode" == "none" ]] && suffix_value='""'
     [[ "$suffix_mode" == "custom" ]] && suffix_value="\"$suffix_custom\""
@@ -135,7 +132,6 @@ $autojoin_block
 $backup_block
 $desc_line
 
-# TURN для звонков (shared-secret, должен совпадать с coturn)
 turn_uris = ["turn:$SUB_TURN:3478?transport=udp", "turn:$SUB_TURN:3478?transport=tcp"]
 turn_secret = "$TURN_PASSWORD"
 turn_ttl = 86400
@@ -151,7 +147,6 @@ min-port=49152
 max-port=65535
 external-ip=$pub_ip
 log-file=stdout
-# hardening: не ретранслировать пакеты в loopback/private-сети (защита от SSRF через TURN)
 denied-peer-ip=0.0.0.0-0.255.255.255
 denied-peer-ip=127.0.0.0-127.255.255.255
 denied-peer-ip=10.0.0.0-10.255.255.255

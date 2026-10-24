@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# modules/40-syncthing.sh — сервис: syncthing
-# Загружается wundergarden.sh; использует общие хелперы основного скрипта.
 
 install_syncthing() {
     ensure_prepared
@@ -14,15 +12,17 @@ install_syncthing() {
     while true; do
         local gui_descr="только localhost (SSH-туннель)"
         [[ "$gui_mode" == "public" ]] && gui_descr="субдомен https://$SUB_SYNC (+basicauth и пароль GUI)"
+        clear
         cat <<SUM
 
 ${c_mag} --- Настройки Syncthing ---${c_off}
   ${c_num}1.${c_off} ${c_txt}GUI: $gui_descr${c_off}
-  ${c_num}2.${c_off} ${c_txt}Логин/пароль GUI: $gui_user / (см. .env: SYNCTHING_GUI_AUTH)${c_off}
+  ${c_num}6.${c_off} ${c_txt}Логин/пароль GUI: $gui_user /${c_off}
   ${c_num}3.${c_off} ${c_txt}Имя устройства: $devname${c_off}
   ${c_num}4.${c_off} ${c_txt}Папка синхронизации по умолчанию: $syncdir${c_off}
-  ${c_num}5.${c_off} ${c_txt}Интервал пересборки папки: ${rescan} с (0 — только события ФС)${c_off}
+  ${c_num}5.${c_off} ${c_txt}Интервал пересборки папки: ${rescan} с${c_off}
 
+  ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
         case "$c" in
@@ -50,8 +50,8 @@ SUM
                 echo "${c_txt}3600 — раз в час (дефолт); значения ниже — чаще сканирование и больше CPU на больших папках.${c_off}"
                 local rs; rs="$(ask "Интервал, секунд" "$rescan")"
                 [[ "$rs" =~ ^[0-9]+$ ]] && rescan="$rs" || warn "нужно число — оставляю $rescan" ;;
-            L|l|Д|д) logs_menu syncthing ;;
-            "") break ;;
+            6) logs_menu syncthing  ;;
+            0) break ;;
             *) warn "нет такого пункта" ;;
         esac
     done
@@ -65,7 +65,6 @@ SUM
     docker compose up -d syncthing
     sleep 6
 
-    # --- имя устройства через REST API ---
     local key devid
     key=$(grep -oPm1 '(?<=<apikey>)[^<]+' "$DATA_DIR/syncthing/config.xml" 2>/dev/null || true)
     if [[ -n "$key" ]]; then
@@ -82,7 +81,6 @@ SUM
         warn "config.xml ещё не создан — имя устройства задайте в GUI при первом входе."
     fi
 
-    # --- интервал пересборки для всех папок ---
     if [[ -n "$key" ]]; then
         local fid
         while IFS= read -r fid; do

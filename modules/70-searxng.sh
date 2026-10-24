@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# modules/70-searxng.sh — сервис: searxng
-# Загружается wundergarden.sh; использует общие хелперы основного скрипта.
 
 install_searxng() {
     ensure_prepared
@@ -10,7 +8,6 @@ install_searxng() {
     local sname
     sname="$(ask "Имя инстанса (шапка страницы)" "HomeSearch")"
 
-    # --- значения по умолчанию ---
     local locale="ru" slang="auto" safe=1 autocomplete="" \
           tracker="true" scihub="false" converter="true" \
           engines_mode="default" engines_list="" \
@@ -25,21 +22,23 @@ install_searxng() {
         [[ -n "$autocomplete" ]] && ac="$autocomplete"
         [[ "$access" == "public" ]] && acc_desc="публичный + limiter"
         [[ "$access" == "open" ]] && acc_desc="открытый (без защиты!)"
+        clear
         cat <<SUM
 
 ${c_mag} --- Настройки SearXNG ---${c_off}
   ${c_num}1.${c_off} ${c_txt}Язык интерфейса: $locale${c_off}
   ${c_num}2.${c_off} ${c_txt}Область поиска: $slang_label${c_off}
-  ${c_num}3.${c_off} ${c_txt}SafeSearch: $(safe_descr "$safe")${c_off}
+  ${c_num}3.${c_off} ${c_txt}SafeSearch: $${c_off}
   ${c_num}4.${c_off} ${c_txt}Автокомплит: $ac${c_off}
-  ${c_num}5.${c_off} ${c_txt}Удаление трекеров из ссылок: $(onoff "$tracker")${c_off}
-  ${c_num}6.${c_off} ${c_txt}Редирект DOI -> sci-hub: $(onoff "$scihub")${c_off}
-  ${c_num}7.${c_off} ${c_txt}Конвертер единиц: $(onoff "$converter")${c_off}
+  ${c_num}5.${c_off} ${c_txt}Удаление трекеров из ссылок: $${c_off}
+  ${c_num}6.${c_off} ${c_txt}Редирект DOI -> sci-hub: $${c_off}
+  ${c_num}7.${c_off} ${c_txt}Конвертер единиц: $${c_off}
   ${c_num}8.${c_off} ${c_txt}Движки: $eng_desc${c_off}
   ${c_num}9.${c_off} ${c_txt}Тема: $theme / $style${c_off}
- ${c_num}10.${c_off} ${c_txt}Доступ: $acc_desc (JSON API отключён)${c_off}
+ ${c_num}10.${c_off} ${c_txt}Доступ: $acc_desc${c_off}
  ${c_num}11.${c_off} ${c_txt}Метод запросов: $method${c_off}
 
+  ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
         case "$c" in
@@ -110,8 +109,8 @@ ENG
                 echo "${c_txt}POST — запросы не светятся в истории и реферерах, но ссылку на выдачу${c_off}"
                 echo "${c_txt}       не сохранить и не переслать.${c_off}"
                 method="$(ask "GET/POST" "$method")" ;;
-            L|l|Д|д) logs_menu searxng ;;
-            "") break ;;
+            12) logs_menu searxng  ;;
+            0) break ;;
             *) warn "нет такого пункта" ;;
         esac
     done
@@ -119,7 +118,6 @@ ENG
     [[ "$access" == "private" ]] && mk_htpasswd search "$auth_user" "$auth_pw"
     local limiter="false"; [[ "$access" == "public" ]] && limiter="true"
 
-    # --- сборка YAML ---
     local uds="use_default_settings: true" e
     if [[ "$engines_mode" == "custom" ]]; then
         uds="use_default_settings:"$'\n'"  engines:"$'\n'"    keep_only:"

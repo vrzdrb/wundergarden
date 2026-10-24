@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# modules/140-gitea.sh — сервис: Gitea (свой Git-хостинг за нашим nginx)
-# Загружается wundergarden.sh; использует общие хелперы основного скрипта.
 
 install_gitea() {
     ensure_prepared
@@ -10,15 +8,19 @@ install_gitea() {
     dns_hint "$SUB"
 
     while true; do
+        clear
+        clear
         cat <<SUM
 
 ${c_mag} --- Настройки Gitea ---${c_off}
   ${c_num}1.${c_off} ${c_txt}Поддомен: https://$SUB${c_off}
-  ${c_num}2.${c_off} ${c_txt}Харденинг (включён всегда): регистрация закрыта, REQUIRE_SIGNIN_VIEW, INSTALL_LOCK,${c_off}
+  ${c_num}2.${c_off} ${c_txt}Харденинг: регистрация закрыта, REQUIRE_SIGNIN_VIEW, INSTALL_LOCK,${c_off}
      SSH выключен, LFS выключен, OpenID выключен, организации приватные
-  ${c_num}3.${c_off} ${c_txt}Git push/pull без лимитов (nginx client_max_body_size = 0)${c_off}
-  ${c_num}4.${c_off} ${c_txt}Первый админ (создаётся через CLI при установке; регистрация закрыта)${c_off}
+  ${c_num}3.${c_off} ${c_txt}Git push/pull без лимитов${c_off}
+  ${c_num}4.${c_off} ${c_txt}Первый админ${c_off}
 
+ ${c_num}5.${c_off} ${c_txt}Логи${c_off}
+  ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
         case "$c" in
@@ -32,8 +34,8 @@ SUM
                 [[ "$g_email" =~ ^[^@[:space:]]+@[^@[:space:]]+$ ]] || { warn "нужен email"; g_email=""; continue; }
                 g_pass="$(ask "Пароль админа (Enter — сгенерировать)" "$(gen_pass)")"
                 log "Реквизиты админа заданы (применятся при установке)." ;;
-            L|l|Д|д) logs_menu gitea gitea-db ;;
-            "") break ;;
+            5) logs_menu gitea gitea-db  ;;
+            0) break ;;
             *) warn "нет такого пункта" ;;
         esac
     done
@@ -51,7 +53,6 @@ SUM
         sleep 2; tries=$((tries + 1))
     done
 
-    # INSTALL_LOCK + DISABLE_REGISTRATION => единственный путь — CLI
     if docker compose exec -T gitea gitea admin user list 2>/dev/null | grep -q .; then
         log "Пользователи уже есть — создание админа пропущено."
     else

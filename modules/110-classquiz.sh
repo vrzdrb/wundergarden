@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# modules/110-classquiz.sh — сервис: classquiz
-# Загружается wundergarden.sh; использует общие хелперы основного скрипта.
 
 install_classquiz() {
     ensure_prepared
@@ -17,18 +15,21 @@ install_classquiz() {
         local se_descr="вкл (без подтверждения email — SMTP не нужен)" cq_prot_descr="по паролю (basicauth)"
         [[ "$skip_email" == "False" ]] && se_descr="выкл (понадобится SMTP!)"
         [[ "$protected" == "false" ]] && cq_prot_descr="открытый (регистрация для всех!)"
+        clear
         cat <<SUM
 
 ${c_mag} --- Настройки ClassQuiz ---${c_off}
   ${c_num}1.${c_off} ${c_txt}Поддомен: https://$SUB${c_off}
-  ${c_num}2.${c_off} ${c_txt}Secret key: задан (в .env)${c_off}
+  ${c_num}2.${c_off} ${c_txt}Secret key: задан${c_off}
   ${c_num}3.${c_off} ${c_txt}Пропуск верификации email: $se_descr${c_off}
-  ${c_num}4.${c_off} ${c_txt}Папка загрузок (картинки викторин): $uploads${c_off}
+  ${c_num}4.${c_off} ${c_txt}Папка загрузок: $uploads${c_off}
   ${c_num}5.${c_off} ${c_txt}Образы: ${img_api##*/} | ${img_front##*/}${c_off}
   ${c_num}6.${c_off} ${c_txt}Лимит RAM Meilisearch: ${meili_mem} МБ${c_off}
   ${c_num}7.${c_off} ${c_txt}Доступ: $cq_prot_descr${c_off}
-  Примечание: PostgreSQL и Valkey — требование архитектуры ClassQuiz (не MySQL-совместимо).
+  Примечание: PostgreSQL и Valkey — требование архитектуры ClassQuiz.
 
+ ${c_num}8.${c_off} ${c_txt}Логи${c_off}
+  ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
         case "$c" in
@@ -54,8 +55,8 @@ SUM
                         [[ -n "$pass" ]] && break
                     done
                 fi ;;
-            L|l|Д|д) logs_menu classquiz-frontend classquiz-api classquiz-worker classquiz-db classquiz-redis classquiz-meili ;;
-            "") break ;;
+            8) logs_menu classquiz-frontend classquiz-api classquiz-worker classquiz-db classquiz-redis classquiz-meili  ;;
+            0) break ;;
             *) warn "нет такого пункта" ;;
         esac
     done

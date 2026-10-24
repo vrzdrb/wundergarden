@@ -183,6 +183,7 @@ update_env() {
 trap 'die "сбой на строке $LINENO — состояние не повреждено, можно повторить пункт."' ERR
 
 print_menu() {
+    clear
     banner
     cat <<MENU
 ${c_mag}$(_t MHDR)${c_off}
@@ -234,11 +235,6 @@ preflight() {
     esac
     command -v curl >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq curl; }
     command -v openssl >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq openssl; }
-    local free_mb
-    free_mb="$({ df -m /var/lib/docker 2>/dev/null || df -m /; } | awk 'NR==2{print $4}' || true)"
-    if [[ -n "$free_mb" && "$free_mb" -lt 10000 ]]; then
-        warn "свободно < 10 ГБ на диске — образы и данные займут ~15–20 ГБ."
-    fi
     if ! curl -fsI --max-time 5 https://download.docker.com >/dev/null 2>&1; then
         warn "download.docker.com недоступен — проверьте сеть/прокси до пункта 0."
     fi
@@ -269,6 +265,7 @@ show_logs() {
 logs_menu() {
     local -a cs=("$@")
     while true; do
+        clear
         echo; echo "$(_t LOGS_TITLE)"
         local i
         for i in "${!cs[@]}"; do printf '  %d) %s\n' "$((i+1))" "${cs[$i]}"; done
@@ -322,6 +319,7 @@ updates_menu() {
                          "limesurvey limesurvey-db" "netdata socket-proxy" "gitea gitea-db" )
 
     while true; do
+        clear
         local -a idx=() i sc running
         echo; echo " --- Обновления: развёрнутые сервисы ---"
         for i in "${!names[@]}"; do
@@ -664,6 +662,8 @@ fail2ban_menu() {
           ssh_port="${F2B_SSH_PORT:-ssh}"
 
     while true; do
+        clear
+        clear
         cat <<SUM
 
 ${c_mag} --- Fail2ban --- ${c_off}
@@ -964,9 +964,13 @@ main() {
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-for m in "$SCRIPT_DIR"/modules/*.sh; do
-    [[ -r "$m" ]] && source "$m"
-done
+shopt -s nullglob
+mods=("$SCRIPT_DIR"/modules/*.sh)
+if [[ ${#mods[@]} -eq 0 ]]; then
+    die "модули не найдены: $SCRIPT_DIR/modules/*.sh — положите modules/ рядом с wundergarden.sh"
+fi
+for m in "${mods[@]}"; do source "$m"; done
+shopt -u nullglob
 
 main "$@"
 

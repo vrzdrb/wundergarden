@@ -51,6 +51,8 @@ dns_hint() {
 
 front_nginx_menu() {
     while true; do
+        clear
+        clear
         cat <<SUM
 
  --- nginx и сертификаты ---
@@ -131,6 +133,7 @@ nginx_menu() {
     log "=== nginx (веб-фасад) ==="
     while true; do
         local st; st=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -qx homeserver-nginx-1 && echo "запущен" || echo "не запущен")
+        clear
         cat <<SUM
 
 ${c_mag} --- nginx: $st ---${c_off}

@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# modules/20-radicale.sh — сервис: radicale
-# Загружается wundergarden.sh; использует общие хелперы основного скрипта.
 
 install_radicale() {
     ensure_prepared
@@ -11,15 +9,18 @@ install_radicale() {
     update_env SUB_CAL "$SUB_CAL"; dns_hint "$SUB_CAL"
 
     while true; do
+        clear
+        clear
         cat <<SUM
 
 ${c_mag} --- Настройки Radicale ---${c_off}
   ${c_num}1.${c_off} ${c_txt}Поддомен: https://$SUB_CAL${c_off}
-  ${c_num}2.${c_off} ${c_txt}Авторизация: ${auth_type/htpasswd/логин и пароль (htpasswd)}${auth_type/none/БЕЗ пароля (!)}${c_off}
+  ${c_num}2.${c_off} ${c_txt}Авторизация: ${auth_type/htpasswd/логин и пароль}${auth_type/none/БЕЗ пароля}${c_off}
   ${c_num}3.${c_off} ${c_txt}Пользователь: ${ruser:-—}${c_off}
   ${c_num}4.${c_off} ${c_txt}Права: $rights${c_off}
   ${c_num}5.${c_off} ${c_txt}Логирование: $level${c_off}
 
+  ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
         case "$c" in
@@ -50,8 +51,8 @@ SUM
                 echo "${c_txt} authenticated — любой залогиненный видит всё${c_off}"
                 rights="$(ask "owner_only / authenticated" "$rights")" ;;
             5) level="$(ask "INFO / DEBUG / WARNING" "$level")" ;;
-            L|l|Д|д) logs_menu radicale ;;
-            "") break ;;
+            5) logs_menu radicale  ;;
+            0) break ;;
             *) warn "нет такого пункта" ;;
         esac
     done

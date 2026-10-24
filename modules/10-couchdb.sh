@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# modules/10-couchdb.sh — сервис: couchdb
-# Загружается wundergarden.sh; использует общие хелперы основного скрипта.
 
 install_couchdb() {
     ensure_prepared
@@ -15,6 +13,7 @@ install_couchdb() {
     while true; do
         local pass_descr="в .env (COUCHDB_PASSWORD)"
         [[ "$fresh" == "true" ]] && pass_descr="будет сгенерирован (или задайте в пункте 2)"
+        clear
         cat <<SUM
 
 ${c_mag} --- Настройки CouchDB ---${c_off}
@@ -24,6 +23,8 @@ ${c_mag} --- Настройки CouchDB ---${c_off}
   ${c_num}4.${c_off} ${c_txt}Лимиты: документ ${maxdoc} МБ | HTTP-запрос ${maxreq} МБ${c_off}
   ${c_num}5.${c_off} ${c_txt}Доп. CORS-origins: ${cors_extra:-—}${c_off}
 
+ ${c_num}6.${c_off} ${c_txt}Логи${c_off}
+  ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
         case "$c" in
@@ -51,13 +52,12 @@ SUM
                 [[ "$mr" =~ ^[0-9]+$ ]] && maxreq="$mr" || warn "нужно число — оставляю $maxreq" ;;
             5) cors_extra="$(ask "Доп. origins через запятую (напр. http://localhost:8080); пусто — без" "$cors_extra")"
                cors_extra="${cors_extra// /}" ;;
-            L|l|Д|д) logs_menu couchdb ;;
-            "") break ;;
+            6) logs_menu couchdb  ;;
+            0) break ;;
             *) warn "нет такого пункта" ;;
         esac
     done
 
-    # на свежей установке пароль подкладываем в env ДО первого старта
     if [[ "$fresh" == "true" && -n "$new_pass" ]]; then
         COUCHDB_PASSWORD="$new_pass"; update_env COUCHDB_PASSWORD "$new_pass"
     fi
@@ -95,7 +95,6 @@ EOF
         [[ "$code" =~ ^(201|412)$ ]] && log "  база $db — ок" || warn "  база $db — HTTP $code"
     done
 
-    # смена пароля на работающем сервере (env применяется только при первом старте)
     if [[ "$fresh" == "false" && -n "$new_pass" ]]; then
         code=$(docker compose exec -T couchdb curl -s -o /dev/null -w '%{http_code}' -X PUT \
             -u "$COUCHDB_USER:$COUCHDB_PASSWORD" \

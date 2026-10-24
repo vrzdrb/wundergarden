@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# modules/120-limesurvey.sh — сервис: limesurvey
-# Загружается wundergarden.sh; использует общие хелперы основного скрипта.
 
 install_limesurvey() {
     ensure_prepared
@@ -13,16 +11,19 @@ install_limesurvey() {
     dns_hint "$SUB"
 
     while true; do
+        clear
+        clear
         cat <<SUM
 
 ${c_mag} --- Настройки LimeSurvey ---${c_off}
   ${c_num}1.${c_off} ${c_txt}Поддомен: https://$SUB${c_off}
-  ${c_num}2.${c_off} ${c_txt}База данных: $([ "$dbtype" == "pgsql" ] && echo PostgreSQL || echo MariaDB/MySQL)${c_off}
-  ${c_num}3.${c_off} ${c_txt}Админ: $admin_user ($admin_name), пароль: задан (в .env)${c_off}
+  ${c_num}2.${c_off} ${c_txt}База данных: $${c_off}
+  ${c_num}3.${c_off} ${c_txt}Админ: $admin_user, пароль: задан${c_off}
   ${c_num}4.${c_off} ${c_txt}Папка uploads: $uploads${c_off}
   ${c_num}5.${c_off} ${c_txt}Образы: ${img##*/} | ${img_db##*/}${c_off}
   Примечание: для удалённого VPS тот же скрипт — просто запустите его там.
 
+  ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
         case "$c" in
@@ -44,8 +45,8 @@ SUM
             5)
                 img="$(ask "Образ приложения" "$img")"
                 img_db="$(ask "Образ БД ($dbtype)" "$img_db")" ;;
-            L|l|Д|д) logs_menu limesurvey limesurvey-db ;;
-            "") break ;;
+            6) logs_menu limesurvey limesurvey-db  ;;
+            0) break ;;
             *) warn "нет такого пункта" ;;
         esac
     done
