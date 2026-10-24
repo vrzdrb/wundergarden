@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# modules/150-jitsi.sh — сервис: Jitsi Meet (отдельный compose-проект из релиза docker-jitsi-meet)
-# Загружается wundergarden.sh; использует общие хелперы основного скрипта.
-# TURN: по умолчанию — наш существующий coturn (пункт 6 меню); свой coturn — опция.
 
 JITSI_DIR="$CONFIG_ROOT/jitsi"
 JITSI_CFG="$CONFIG_ROOT/data/jitsi-cfg"
@@ -14,7 +11,7 @@ jitsi_dc() {
     ( cd "$JITSI_DIR" && docker compose "${files[@]}" "$@" )
 }
 
-jitsi_set_env() { # key value — правит .env без sed-инъекций
+jitsi_set_env() {
     local key="$1" val="$2"
     ( cd "$JITSI_DIR" && { grep -v "^${key}=" .env || true; echo "${key}=${val}"; } > .env.tmp.$$ && mv .env.tmp.$$ .env )
 }
@@ -26,7 +23,6 @@ install_jitsi() {
     log "=== Jitsi Meet (видеоконференции) ==="
     [[ -d "$JITSI_DIR" ]] && { ask_yn "Обнаружена установка в $JITSI_DIR — переустановить? Конфиг сохранится." || return 0; }
 
-    # --- интерактив ---
     local domain pub_ip mode turn_src tz
     while true; do
         domain="$(ask "Домен (meet.$DOMAIN)" "meet.$DOMAIN")"
@@ -45,7 +41,6 @@ install_jitsi() {
         warn "наш coturn ещё не установлен — сначала пункт 6 (Matrix), либо выберите '2'."
     tz="$(ask "Часовой пояс" "$TZ")"
 
-    # --- скачивание релиза ---
     log "Скачиваю docker-jitsi-meet (последний релиз)..."
     local json tag zipurl topdir
     json="$(curl -fsSL https://api.github.com/repos/jitsi/docker-jitsi-meet/releases/latest)"
@@ -75,7 +70,6 @@ install_jitsi() {
     jitsi_set_env HTTP_PORT 7443
     jitsi_set_env HTTPS_PORT 8443
 
-    # --- TURN ---
     if [[ "$turn_src" == "1" ]]; then
         rm -f "$JITSI_DIR/coturn.yml"
         jitsi_set_env TURN_HOST "$SUB_TURN"
@@ -114,13 +108,11 @@ EOF
         ( cd "$JITSI_DIR" && sed -i '/^TURNS_HOST=/d;/^TURNS_PORT=/d' .env )
     fi
 
-    # каталоги конфигурации (требования rootless-образов)
     mkdir -p "$JITSI_CFG"/{web,prosody/config,jicofo,jvb}
     mkdir -p "$JITSI_CFG"/storage/{jibri,prosody}
     mkdir -p "$JITSI_CFG"/tmp/web-crontabs
     chmod -R 777 "$JITSI_CFG"/storage "$JITSI_CFG"/tmp 2>/dev/null || true
 
-    # localhost-биндинг веб-портов (для режима "за нашим nginx")
     if [[ "$mode" == "1" ]]; then
         sed -i "s#- '\${HTTP_PORT}:8000'#- '127.0.0.1:\${HTTP_PORT}:8000'#" docker-compose.yml
         sed -i "s#- '\${HTTPS_PORT}:8443'#- '127.0.0.1:\${HTTPS_PORT}:8443'#" docker-compose.yml
@@ -129,7 +121,6 @@ EOF
     docker compose -f docker-compose.yml ${turn_src:+$( [[ "$turn_src" == "2" ]] && echo "-f coturn.yml" )} pull
     jitsi_dc up -d || die "ошибка запуска: cd $JITSI_DIR && docker compose logs"
 
-    # сайт за нашим nginx
     if [[ "$mode" == "1" ]]; then
         add_site 150-jitsi "server {
     listen 8443 ssl;
@@ -156,7 +147,7 @@ EOF
 EOF
 }
 
-jitsi_toggle_udp() { # 3478: tcp+udp ИЛИ только tcp
+jitsi_toggle_udp() {
     if [[ -f "$JITSI_DIR/coturn.yml" ]]; then
         local conf="$JITSI_CFG/coturn/turnserver.conf"
     else
@@ -183,13 +174,14 @@ jitsi_menu() {
 
 ${c_mag} --- Jitsi Meet ---${c_off}
   ${c_num}1.${c_off} ${c_txt}Установка / переустановка${c_off}
-  ${c_num}2.${c_off} ${c_txt}Включить JWT-аутентификацию (комнаты только по токену)${c_off}
+  ${c_num}2.${c_off} ${c_txt}Включить JWT-аутентификацию${c_off}
   ${c_num}3.${c_off} ${c_txt}3478: переключить TCP+UDP / только TCP${c_off}
   ${c_num}4.${c_off} ${c_txt}Пересоздать и перезапустить контейнеры${c_off}
-  ${c_num}5.${c_off} ${c_txt}Запустить token-сервер (выдача токенов)${c_off}
+  ${c_num}5.${c_off} ${c_txt}Запустить token-сервер${c_off}
   ${c_num}6.${c_off} ${c_txt}Выдать токен для комнаты${c_off}
   ${c_num}7.${c_off} ${c_txt}Остановить token-сервер${c_off}
 
+  ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
         case "$c" in
@@ -200,8 +192,8 @@ SUM
             5) jitsi_token_server_start ;;
             6) jitsi_issue_token ;;
             7) jitsi_token_server_stop ;;
-            L|l|Д|д) [[ -d "$JITSI_DIR" ]] && jitsi_dc logs --tail=50 ;;
-            "") return 0 ;;
+            8) [[ -d "$JITSI_DIR" ]] && jitsi_dc logs --tail=50 ;;
+            0) return 0 ;;
             *) warn "нет такого пункта" ;;
         esac
     done
@@ -224,13 +216,12 @@ jitsi_enable_jwt() {
 
 install_jitsi_entry() { install_jitsi; }
 
-# ---------- Token-сервер (localhost:5000, выдача JWT по комнатам) ----------
 
 jitsi_token_server_running() {
     [[ -f "$JITSI_TOKEN_DIR/server.pid" ]] && kill -0 "$(cat "$JITSI_TOKEN_DIR/server.pid")" 2>/dev/null
 }
 
-jitsi_token_key_ensure() { # одноразовая генерация ключа доступа к /token
+jitsi_token_key_ensure() {
     local key; key="$(jitsi_get_env JITSI_TOKEN_KEY)"
     if [[ -z "$key" ]]; then
         key="$(gen_pass)"
@@ -261,7 +252,6 @@ TOKEN_KEY = os.environ["JITSI_TOKEN_KEY"]
 
 @app.route("/token")
 def gen():
-    # харденинг: выдача только с ключом (генерируется один раз при деплое, хранится в .env 600)
     if not hmac.compare_digest(request.headers.get("X-Token-Key", ""), TOKEN_KEY):
         abort(403)
     room = request.args.get("room", "conference1")

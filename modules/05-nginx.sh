@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# modules/05-nginx.sh — пункт меню 3: сертификаты (acme.sh), запуск, stream-домены, сайты
-# Загружается wundergarden.sh; использует общие хелперы основного скрипта.
 
-hsts_line_enable() { # вставить/убрать строку HSTS в config/nginx/nginx.conf по HSTS_ENABLED
+hsts_line_enable() {
     local f="$CONFIG_ROOT/config/nginx/nginx.conf"
     [[ -f "$f" ]] || return 0
     sed -i '/Strict-Transport-Security/d' "$f"
@@ -21,7 +19,7 @@ reload_nginx() {
     fi
 }
 
-add_site() { # add_site 10-obsidian "$content"   -> config/nginx/conf.d/NN.conf (+ запрет dotfiles) + reload
+add_site() {
     local f="$CONFIG_ROOT/config/nginx/conf.d/$1.conf"
     printf '%s\n' "$2" > "$f"
     if [[ "$(tail -n 1 "$f")" == "}" ]]; then
@@ -31,21 +29,21 @@ add_site() { # add_site 10-obsidian "$content"   -> config/nginx/conf.d/NN.conf 
     reload_nginx
 }
 
-add_stream() { # add_stream 10-mumble "$content" -> config/nginx/stream.d/NN.conf + reload
+add_stream() {
     printf '%s\n' "$2" > "$CONFIG_ROOT/config/nginx/stream.d/$1.conf"; reload_nginx
 }
 
-mk_htpasswd() { # mk_htpasswd <slug> <user> <pass> — файл basic-auth для nginx (apr1)
+mk_htpasswd() {
     mkdir -p "$CONFIG_ROOT/config/nginx/htpasswd"
     printf '%s:%s\n' "$2" "$(openssl passwd -apr1 "$3")" > "$CONFIG_ROOT/config/nginx/htpasswd/$1"
     chmod 640 "$CONFIG_ROOT/config/nginx/htpasswd/$1" || true
 }
 
-auth_conf() { # auth_conf <slug> <realm> — две строки auth_basic для server-блока
+auth_conf() {
     printf '        auth_basic "%s";\n        auth_basic_user_file /etc/nginx/htpasswd/%s;\n' "$2" "$1"
 }
 
-dns_hint() { # dns_hint subdomain
+dns_hint() {
     if ! getent ahosts "$1" >/dev/null 2>&1; then
         warn "$1 не резолвится — сертификат не выпустится/не пройдёт проверка, пока нет A-записи на ваш IP."
     fi
@@ -56,23 +54,24 @@ front_nginx_menu() {
         cat <<SUM
 
  --- nginx и сертификаты ---
-  1. Сертификаты (acme.sh, wildcard DNS-01) — делать ПЕРВЫМ
-  2. Запуск nginx, stream-домены, полный конфиг (nginx -T)
-  3. Перечитать конфигурацию (nginx -s reload)
+  1. Сертификаты — делать ПЕРВЫМ
+  2. Запуск nginx, stream-домены, полный конфиг
+  3. Перечитать конфигурацию
 
+  ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_BACK)" c || true
         case "$c" in
             1) certs_menu ;;
             2) nginx_menu ;;
             3) reload_nginx ;;
-            "") return 0 ;;
+            0) return 0 ;;
             *) warn "нет такого пункта" ;;
         esac
     done
 }
 
-certs_menu() { # certs_menu [auto] — без подменю (для "установить всё")
+certs_menu() {
     log "=== Сертификаты (acme.sh, wildcard через DNS-01) ==="
     if [[ ! -x "$HOME/.acme.sh/acme.sh" ]]; then
         ask_yn "Установить acme.sh?" || return 0
@@ -135,13 +134,14 @@ nginx_menu() {
         cat <<SUM
 
 ${c_mag} --- nginx: $st ---${c_off}
-  ${c_num}1.${c_off} ${c_txt}Запустить / перезапустить (с проверкой конфига)${c_off}
-  ${c_num}2.${c_off} ${c_txt}Stream-пасsthrough домены (SNI -> внешний TLS-терминатор): ${STREAM_DOMAINS:-нет}${c_off}
-  ${c_num}3.${c_off} ${c_txt}Показать полный текущий конфиг (nginx -T)${c_off}
-  ${c_num}4.${c_off} ${c_txt}HSTS (max-age=1 год; БЕЗ includeSubDomains и preload): $(onoff "${HSTS_ENABLED:-false}")${c_off}
-  Порты: 80 (редирект), 443 (stream: SNI-роутинг, по умолчанию -> локальный HTTPS),
-         64738 (Mumble, TLS терминирует nginx).
+  ${c_num}1.${c_off} ${c_txt}Запустить / перезапустить${c_off}
+  ${c_num}2.${c_off} ${c_txt}Stream-пасsthrough домены: ${STREAM_DOMAINS:-нет}${c_off}
+  ${c_num}3.${c_off} ${c_txt}Показать полный текущий конфиг${c_off}
+  ${c_num}4.${c_off} ${c_txt}HSTS: $${c_off}
+  Порты: 80, 443,
+         64738.
 
+  ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_NGINX)" c || true
         case "$c" in
@@ -200,7 +200,6 @@ SUM
                     fi
                 done; unset IFS
                 lst="$entry_clean"; update_env STREAM_DOMAINS "$lst"
-                # пересобираем map
                 {
                     echo "${c_txt}map \$ssl_preread_server_name \$stream_upstream {${c_off}"
                     local entry d p
@@ -221,10 +220,10 @@ SUM
                 } > "$CONFIG_ROOT/config/nginx/stream.d/00-map.conf"
                 reload_nginx
                 log "00-map.conf пересобран: ${STREAM_DOMAINS:-(пусто)}." ;;
-            L|l|Д|д)
+            5)
                 docker compose logs --tail=50 nginx 2>&1 | tail -n 50 || true
                 read -rp "$(_t BACK)" _ || true ;;
-            "") break ;;
+            0) break ;;
             *) warn "нет такого пункта" ;;
         esac
     done
