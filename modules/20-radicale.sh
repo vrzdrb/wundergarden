@@ -51,7 +51,7 @@ SUM
                 echo "${c_txt} authenticated — любой залогиненный видит всё${c_off}"
                 rights="$(ask "owner_only / authenticated" "$rights")" ;;
             5) level="$(ask "INFO / DEBUG / WARNING" "$level")" ;;
-            5) logs_menu radicale  ;;
+            6) logs_menu radicale  ;;
             0) break ;;
             *) warn "нет такого пункта" ;;
         esac

@@ -93,7 +93,9 @@ _t() {
             SRV09) echo "Block RKN" ;;
             SRV10) echo "Add swap" ;;
             SRV11) echo "Enable sudo logging" ;;
-            SRV12) echo "Fail2ban" ;; SRV02) echo "User and sudo" ;; SRV05) echo "SSH hardening" ;; SRV07) echo "UFW" ;; SRV09) echo "Swap" ;; SRV11) echo "DNS-over-TLS" ;; SRV13) echo "RKN AS blocklist" ;; SRV15) echo "VPS diagnostics" ;;
+            SRV12) echo "Fail2ban" ;;
+        SRV13) echo "RKN AS blocklist" ;;
+        SRV15) echo "VPS diagnostics" ;;
             PREP_W1) echo "Next: item 3 (nginx and certificates: certificates first, then startup)." ;;
             PREP_W2) echo "Don't forget: A-records of subdomains -> your static IP, forward 80/443 on the router." ;;
         esac
@@ -130,7 +132,7 @@ _t() {
         PROMPT_NGINX)    echo "Номер пункта: " ;;
         PROMPT_UPD)      echo "Номер пункта: " ;;
         LOGS_TITLE) echo " --- Логи какого контейнера? ---" ;;
-        LOGS_ALL)   echo "  a) $(_t LOGS_ALL)" ;;
+        LOGS_ALL)   echo "  a) все контейнеры" ;;
         LOGS_NUM)   echo "Номер пункта: " ;;
         LOGS_BAD)   echo "нет такого номера" ;;
         LOGS_NOTRUN) echo "контейнер не запущен (установите сервис или смотрите пункт 17 'Статус')" ;;
@@ -400,7 +402,7 @@ banaction = iptables-multiport
 
 [sshd]
 enabled = $enabled
-port    = $7
+port    = $ssh_port
 logpath = /var/log/auth.log
 
 $recidive_block
@@ -663,7 +665,6 @@ fail2ban_menu() {
 
     while true; do
         clear
-        clear
         cat <<SUM
 
 ${c_mag} --- Fail2ban --- ${c_off}
@@ -857,7 +858,7 @@ EOF
 server_menu() {
     [[ $EUID -eq 0 ]] || { warn "нужен root"; return 1; }
     while true; do
-        cat 
+        cat <<SUM
 $(_t SRV_TITLE)
   ${c_num}1.${c_off} ${c_txt}$(_t SRV01)${c_off}
   ${c_num}2.${c_off} ${c_txt}$(_t SRV02)${c_off}
@@ -959,7 +960,6 @@ main() {
             0) exit 0 ;;
             *) warn "нет такого пункта" ;;
         esac
-        echo; read -rp "Enter — вернуться в меню " _ || true
     done
 }
 

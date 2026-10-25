@@ -140,7 +140,7 @@ ${c_mag} --- nginx: $st ---${c_off}
   ${c_num}1.${c_off} ${c_txt}Запустить / перезапустить${c_off}
   ${c_num}2.${c_off} ${c_txt}Stream-пасsthrough домены: ${STREAM_DOMAINS:-нет}${c_off}
   ${c_num}3.${c_off} ${c_txt}Показать полный текущий конфиг${c_off}
-  ${c_num}4.${c_off} ${c_txt}HSTS: $${c_off}
+  ${c_num}4.${c_off} ${c_txt}HSTS: $(onoff "${HSTS_ENABLED:-false}")${c_off}
   Порты: 80, 443,
          64738.
 

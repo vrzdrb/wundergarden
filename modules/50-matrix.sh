@@ -34,14 +34,14 @@ install_matrix() {
 ${c_mag} --- Настройки continuwuity ---${c_off}
   ${c_num}1.${c_off} ${c_txt}Описание сервера: ${desc:-—}${c_off}
   ${c_num}2.${c_off} ${c_txt}Регистрация: $reg_descr${reg_token:+}${suspend_new:+; новые — заморожены до одобрения}${c_off}
-  ${c_num}3.${c_off} ${c_txt}Сквозное шифрование: $${c_off}
+  ${c_num}3.${c_off} ${c_txt}Сквозное шифрование: $(onoff "$e2ee")${c_off}
   ${c_num}4.${c_off} ${c_txt}Суффикс имени новых юзеров: $suffix_descr${c_off}
-  ${c_num}5.${c_off} ${c_txt}Блокировать приглашения не-админам: $${c_off}
+  ${c_num}5.${c_off} ${c_txt}Блокировать приглашения не-админам: $(onoff "$block_invites")${c_off}
   ${c_num}6.${c_off} ${c_txt}Автовступление новых юзеров в комнаты: ${auto_join:-—}${c_off}
   ${c_num}7.${c_off} ${c_txt}Проверка анонсов: $${c_off}
   ${c_num}8.${c_off} ${c_txt}Профиль кэша БД: $cache_descr${c_off}
-  ${c_num}9.${c_off} ${c_txt}Федерация с другими серверами: $${c_off}
- ${c_num}10.${c_off} ${c_txt}Онлайн-бэкапы базы: $${c_off}
+  ${c_num}9.${c_off} ${c_txt}Федерация с другими серверами: $(onoff "$fed")${c_off}
+ ${c_num}10.${c_off} ${c_txt}Онлайн-бэкапы базы: $(onoff "$online_backup")${c_off}
  ${c_num}11.${c_off} ${c_txt}TURN/STUN: turn:$SUB_TURN:3478${c_off}
 
   ${c_num}0.${c_off} ${c_txt}Назад${c_off}

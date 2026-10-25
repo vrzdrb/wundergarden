@@ -17,7 +17,7 @@ install_limesurvey() {
 
 ${c_mag} --- Настройки LimeSurvey ---${c_off}
   ${c_num}1.${c_off} ${c_txt}Поддомен: https://$SUB${c_off}
-  ${c_num}2.${c_off} ${c_txt}База данных: $${c_off}
+  ${c_num}2.${c_off} ${c_txt}База данных: $dbtype${c_off}
   ${c_num}3.${c_off} ${c_txt}Админ: $admin_user, пароль: задан${c_off}
   ${c_num}4.${c_off} ${c_txt}Папка uploads: $uploads${c_off}
   ${c_num}5.${c_off} ${c_txt}Образы: ${img##*/} | ${img_db##*/}${c_off}
@@ -59,7 +59,11 @@ SUM
     mkdir -p "$uploads"
 
     docker compose up -d limesurvey-db
-    wait_container limesurvey-db mariadb-admin ping -h127.0.0.1
+    if [[ "$dbtype" == "pgsql" ]]; then
+        wait_container limesurvey-db pg_isready -U limesurvey
+    else
+        wait_container limesurvey-db mariadb-admin ping -h127.0.0.1
+    fi
     docker compose up -d limesurvey
 
     add_site 49-survey "server {

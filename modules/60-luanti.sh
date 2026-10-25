@@ -23,7 +23,7 @@ ${c_mag} --- Настройки Luanti ---${c_off}
   ${c_num}2.${c_off} ${c_txt}Мир: $world | игра: $game${c_off}
   ${c_num}3.${c_off} ${c_txt}Название сервера: $sname | MOTD: ${motd:-—}${c_off}
   ${c_num}4.${c_off} ${c_txt}Режим игры: $mode_descr${c_off}
-  ${c_num}5.${c_off} ${c_txt}PvP: $${c_off}
+  ${c_num}5.${c_off} ${c_txt}PvP: $(onoff "$pvp")${c_off}
   ${c_num}6.${c_off} ${c_txt}Мирогенерация: $mg | seed: ${seed:-случайный}${c_off}
   ${c_num}7.${c_off} ${c_txt}Макс. игроков: $maxusers${c_off}
   ${c_num}8.${c_off} ${c_txt}Публикация в списке серверов: $announce_descr${c_off}

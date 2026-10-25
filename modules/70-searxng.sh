@@ -28,11 +28,11 @@ install_searxng() {
 ${c_mag} --- Настройки SearXNG ---${c_off}
   ${c_num}1.${c_off} ${c_txt}Язык интерфейса: $locale${c_off}
   ${c_num}2.${c_off} ${c_txt}Область поиска: $slang_label${c_off}
-  ${c_num}3.${c_off} ${c_txt}SafeSearch: $${c_off}
+  ${c_num}3.${c_off} ${c_txt}SafeSearch: $safe${c_off}
   ${c_num}4.${c_off} ${c_txt}Автокомплит: $ac${c_off}
-  ${c_num}5.${c_off} ${c_txt}Удаление трекеров из ссылок: $${c_off}
-  ${c_num}6.${c_off} ${c_txt}Редирект DOI -> sci-hub: $${c_off}
-  ${c_num}7.${c_off} ${c_txt}Конвертер единиц: $${c_off}
+  ${c_num}5.${c_off} ${c_txt}Удаление трекеров из ссылок: $(onoff "$tracker")${c_off}
+  ${c_num}6.${c_off} ${c_txt}Редирект DOI -> sci-hub: $(onoff "$scihub")${c_off}
+  ${c_num}7.${c_off} ${c_txt}Конвертер единиц: $(onoff "$converter")${c_off}
   ${c_num}8.${c_off} ${c_txt}Движки: $eng_desc${c_off}
   ${c_num}9.${c_off} ${c_txt}Тема: $theme / $style${c_off}
  ${c_num}10.${c_off} ${c_txt}Доступ: $acc_desc${c_off}

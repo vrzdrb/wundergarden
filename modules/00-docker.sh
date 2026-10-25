@@ -471,12 +471,8 @@ services:
       - MYSQL_DATABASE=limesurvey
       - MYSQL_USER=limesurvey
       - MYSQL_PASSWORD=${LIMESURVEY_DB_PASSWORD}
-      - POSTGRES_USER=limesurvey
-      - POSTGRES_PASSWORD=${LIMESURVEY_DB_PASSWORD}
-      - POSTGRES_DB=limesurvey
     volumes:
       - ./data/limesurvey-db:/var/lib/mysql
-      - ./data/limesurvey-db:/var/lib/postgresql/data
     networks: [net-survey]
 
   gitea:
