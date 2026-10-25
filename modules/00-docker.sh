@@ -158,7 +158,7 @@ services:
     volumes:
       - ${SFTPGO_DATA}:/var/lib/sftpgo
     ports:
-      - "127.0.0.1:8080:8080"   # админка только с localhost
+      - "127.0.0.1:8080:8080"
       - ${SFTPGO_SFTP_BIND:-127.0.0.1:2022}:2022
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz >/dev/null 2>&1 || exit 1"]
@@ -218,7 +218,7 @@ services:
     restart: unless-stopped
     <<: *harden
     logging: *log
-    network_mode: host   # TURN должен видеть реальные IP клиентов; 49152-65535/udp без docker-NAT
+    network_mode: host
     volumes:
       - ./data/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
 
@@ -544,7 +544,7 @@ services:
     ports:
       - "127.0.0.1:19999:19999"
     volumes:
-      - ./data/netdata:/etc/netdata
+      - ./data/netdata/etc:/etc/netdata
       - netdata-lib:/var/lib/netdata
       - netdata-cache:/var/cache/netdata
       - /:/host/root:ro,rslave
@@ -611,10 +611,14 @@ prep_system() {
     fi
 
     if [[ ! -f "$ENV_FILE" ]]; then
-        local domain tz email matrix_image luanti_image
+        local domain email matrix_image luanti_image
+        # Читаем часовой пояс из системы (настроен в подменю "Настройка сервера")
+        local tz
+        tz="$(timedatectl show --property=Timezone --value 2>/dev/null || echo "Europe/Moscow")"
+        log "Часовой пояс из системы: $tz"
+        
         domain="$(ask "Ваш домен (например: example.com)")"
         [[ "$domain" =~ ^[a-zA-Z0-9.-]+$ ]] || die "похоже, это не домен: $domain"
-        tz="$(ask "Часовой пояс" "Europe/Moscow")"
         email="$(ask "Email для Let's Encrypt" "admin@$domain")"
         matrix_image="$(ask "Образ continuwuity" "ghcr.io/continuwuity/continuwuity:latest")"
         luanti_image="$(ask "Образ Luanti" "linuxserver/minetest:latest")"
@@ -734,7 +738,7 @@ http {
     add_header Referrer-Policy strict-origin-when-cross-origin always;
 
     access_log off;
-    error_log /var/log/nginx/error.log warn;   # файл — для fail2ban (пункт 10)
+    error_log /var/log/nginx/error.log warn;
     server {
         listen 80 default_server;
         return 301 https://$host$request_uri;
@@ -780,8 +784,8 @@ NGXEOF
 
     gen_compose
     log "Подготовка завершена. Секреты в $ENV_FILE (права 600)."
-    warn "$(_t PREP_W1)"
-    warn "$(_t PREP_W2)"
+    warn "Дальше: пункт 3 (nginx и сертификаты: сначала сертификаты, затем запуск)."
+    warn "Не забудьте: A-записи поддоменов -> ваш статический IP, проброс 80/443 на роутере."
 }
 
-ensure_prepared() { [[ -f "$ENV_FILE" && -f "$COMPOSE_FILE" ]] || { warn "Сначала выполните пункт 0 (подготовка)."; prep_system; }; load_env; }
+ensure_prepared() { [[ -f "$ENV_FILE" && -f "$COMPOSE_FILE" ]] || { warn "Сначала выполните пункт 2 (подготовка)."; prep_system; }; load_env; }

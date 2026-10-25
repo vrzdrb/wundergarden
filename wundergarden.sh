@@ -2,6 +2,9 @@
 set -euo pipefail
 IFS=$'\n\t'
 
+# ВАЖНО: Определяем SCRIPT_DIR ДО смены директории!
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 CONFIG_ROOT="/opt/homeserver"
 DATA_DIR="$CONFIG_ROOT/data"
 BACKUP_DIR="$CONFIG_ROOT/backups"
@@ -21,6 +24,16 @@ c_num=$'\033[1;38;5;213m'
 c_txt=$'\033[96m'
 c_dim=$'\033[2m'
 c_off=$'\033[0m'
+
+# Проверка наличия команды и установка если нужно
+require_cmd() {
+    local cmd="$1" pkg="${2:-$1}"
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        warn "$cmd не найден — устанавливаю $pkg..."
+        apt-get update -qq && apt-get install -y -qq "$pkg"
+    fi
+}
+
 banner() {
     if [[ "${COLUMNS:-80}" -lt 80 ]]; then
         printf '%s  W U N D E R G A R D E N%s\n' "$c_mag" "$c_off"
@@ -47,58 +60,41 @@ _t() {
             M01) echo "Server setup" ;;
             M02) echo "Docker — system preparation" ;;
             M03) echo "nginx and certificates" ;;
-            M04) echo "CouchDB — Obsidian LiveSync" ;;
-            M05) echo "Radicale — CalDAV" ;;
-            M06) echo "SFTPGo — files and share links for friends" ;;
-            M07) echo "Syncthing" ;;
-            M08) echo "Matrix — continuwuity + coturn" ;;
-            M09) echo "Luanti server" ;;
-            M10) echo "SearXNG — meta-search" ;;
-            M11) echo "Excalidraw — whiteboard + saving + rooms" ;;
-            M12) echo "Etherpad — collaborative text editor" ;;
-            M13) echo "Mumble — voice for lessons" ;;
-            M14) echo "ClassQuiz — Kahoot-style quizzes" ;;
-            M15) echo "LimeSurvey — surveys and tests" ;;
-            M16) echo "Backups" ;;
-            M17) echo "Status" ;;
-            M18) echo "Updates" ;;
-            M19) echo "Language / Язык" ;;
-            M20) echo "Netdata" ;;
-            M21) echo "Gitea" ;;
-            M22) echo "Jitsi Meet" ;;
+            M04) echo "Netdata — monitoring" ;;
+            M05) echo "Gitea — Git hosting" ;;
+            M06) echo "Jitsi Meet" ;;
+            M07) echo "CouchDB — Obsidian LiveSync" ;;
+            M08) echo "Radicale — CalDAV" ;;
+            M09) echo "SFTPGo — files" ;;
+            M10) echo "Syncthing" ;;
+            M11) echo "Matrix — continuwuity + coturn" ;;
+            M12) echo "Luanti server" ;;
+            M13) echo "SearXNG — meta-search" ;;
+            M14) echo "Excalidraw" ;;
+            M15) echo "Etherpad" ;;
+            M16) echo "Mumble" ;;
+            M17) echo "ClassQuiz" ;;
+            M18) echo "LimeSurvey" ;;
+            M19) echo "Backups" ;;
+            M20) echo "Status" ;;
+            M21) echo "Updates" ;;
+            M22) echo "Language / Язык" ;;
             MQ)   echo "  ${c_num}0.${c_off} ${c_txt}Exit${c_off}" ;;
             MFTR) echo "-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-" ;;
-            PROMPT_SETTINGS) echo "Item number: " ;;
-            PROMPT_BACK)     echo "Item number: " ;;
-            PROMPT_NGINX)    echo "Item number: " ;;
-            PROMPT_UPD)      echo "Item number: " ;;
-            LOGS_TITLE) echo " --- Which container's logs? ---" ;;
-            LOGS_ALL)   echo "  a) all of them" ;;
-            BACK0)      echo "Back" ;;
-            LOGS_NUM)   echo "Item number: " ;;
-            LOGS_BAD)   echo "no such number" ;;
-            LOGS_NOTRUN) echo "container not running (install the service or see item 17 'Status')" ;;
-            LOGS_TAIL)  echo "(last 50 lines)" ;;
-            BACK_SETTINGS) echo "Enter — back to settings " ;;
-            BACK)          echo "Enter — back " ;;
-            SRV_TITLE) echo " --- Server setup --- " ;;
-            SRV01) echo "System update" ;;
-            SRV02) echo "Network settings" ;;
-            SRV03) echo "Set timezone" ;;
-            SRV04) echo "Scheduled automatic reboot" ;;
-            SRV05) echo "Configure password policy" ;;
-            SRV06) echo "Create user" ;;
-            SRV07) echo "SSH settings" ;;
-            SRV08) echo "UFW settings" ;;
-            SRV09) echo "Block RKN" ;;
-            SRV10) echo "Add swap" ;;
-            SRV11) echo "Enable sudo logging" ;;
-            SRV12) echo "Fail2ban" ;;
-        SRV13) echo "RKN AS blocklist" ;;
-        SRV15) echo "VPS diagnostics" ;;
-            PREP_W1) echo "Next: item 3 (nginx and certificates: certificates first, then startup)." ;;
-            PREP_W2) echo "Don't forget: A-records of subdomains -> your static IP, forward 80/443 on the router." ;;
-        esac
+        SRV01) echo "Timezone" ;;
+        SRV02) echo "BBR, IPv6, DNS" ;;
+        SRV03) echo "Scheduled reboot" ;;
+        SRV04) echo "Password policy" ;;
+        SRV05) echo "Create user" ;;
+        SRV06) echo "SSH settings" ;;
+        SRV07) echo "UFW settings" ;;
+        SRV10) echo "Swap" ;;
+        SRV11) echo "Sudo logging" ;;
+        SRV12) echo "Fail2ban" ;;
+        SRV13) echo "Unattended upgrades" ;;
+        SRV14) echo "Root mail (SMTP)" ;;
+        SRV15) echo "Shell history" ;;
+        SRV16) echo "VPS diagnostics" ;;        esac
         return
     fi
     case "$1" in
@@ -106,57 +102,46 @@ _t() {
         M01) echo "Настройка сервера" ;;
         M02) echo "Docker — подготовка системы" ;;
         M03) echo "nginx и сертификаты" ;;
-        M04) echo "CouchDB — Obsidian LiveSync" ;;
-        M05) echo "Radicale — CalDAV" ;;
-        M06) echo "SFTPGo — файлы и ссылки для друзей" ;;
-        M07) echo "Syncthing" ;;
-        M08) echo "Matrix — continuwuity + coturn" ;;
-        M09) echo "Luanti-сервер" ;;
-        M10) echo "SearXNG — мета-поиск" ;;
-        M11) echo "Excalidraw — доска + сохранение + комнаты" ;;
-        M12) echo "Etherpad — совместный текстовый редактор" ;;
-        M13) echo "Mumble — голос для уроков" ;;
-        M14) echo "ClassQuiz — викторины Kahoot-стиля" ;;
-        M15) echo "LimeSurvey — опросы и тесты" ;;
-        M16) echo "Бэкапы" ;;
-        M17) echo "Статус" ;;
-        M18) echo "Обновления" ;;
-        M19) echo "Язык / Language" ;;
-        M20) echo "Netdata — мониторинг" ;;
-        M21) echo "Gitea — свой Git-хостинг за nginx" ;;
-        M22) echo "Jitsi Meet" ;;
+        M04) echo "Netdata — мониторинг" ;;
+        M05) echo "Gitea — Git-хостинг" ;;
+        M06) echo "Jitsi Meet" ;;
+        M07) echo "CouchDB — Obsidian LiveSync" ;;
+        M08) echo "Radicale — CalDAV" ;;
+        M09) echo "SFTPGo — файлы" ;;
+        M10) echo "Syncthing" ;;
+        M11) echo "Matrix — continuwuity + coturn" ;;
+        M12) echo "Luanti-сервер" ;;
+        M13) echo "SearXNG — мета-поиск" ;;
+        M14) echo "Excalidraw — доска" ;;
+        M15) echo "Etherpad — редактор" ;;
+        M16) echo "Mumble — голос" ;;
+        M17) echo "ClassQuiz — викторины" ;;
+        M18) echo "LimeSurvey — опросы" ;;
+        M19) echo "Бэкапы" ;;
+        M20) echo "Статус" ;;
+        M21) echo "Обновления" ;;
+        M22) echo "Язык / Language" ;;
         MQ)   echo "  ${c_num}0.${c_off} ${c_txt}Выход${c_off}" ;;
         MFTR) echo "-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-" ;;
-        PROMPT_SETTINGS) echo "Номер пункта: " ;;
-        PROMPT_BACK)     echo "Номер пункта: " ;;
-        PROMPT_NGINX)    echo "Номер пункта: " ;;
-        PROMPT_UPD)      echo "Номер пункта: " ;;
-        LOGS_TITLE) echo " --- Логи какого контейнера? ---" ;;
-        LOGS_ALL)   echo "  a) все контейнеры" ;;
-        LOGS_NUM)   echo "Номер пункта: " ;;
-        LOGS_BAD)   echo "нет такого номера" ;;
-        LOGS_NOTRUN) echo "контейнер не запущен (установите сервис или смотрите пункт 17 'Статус')" ;;
-        LOGS_TAIL)  echo "(последние 50 строк)" ;;
-        BACK_SETTINGS) echo "Enter — вернуться в меню настроек " ;;
-        BACK)          echo "Enter — назад " ;;
-        SRV_TITLE) echo " --- Настройка сервера --- " ;;
-        SRV01) echo "Обновление системы" ;;
-        SRV02) echo "Настройки сети" ;;
-        SRV03) echo "Установка часового пояса" ;;
-        SRV04) echo "Автоматическая перезагрузка по расписанию" ;;
-        SRV05) echo "Установить политику паролей" ;;
-        SRV06) echo "Создание пользователя" ;;
-        SRV07) echo "Настройки SSH" ;;
-        SRV08) echo "Настройки UFW" ;;
-        SRV09) echo "Запретить РКН" ;;
-        SRV10) echo "Добавить подкачку" ;;
-        SRV11) echo "Включить логирование sudo" ;;
-        SRV12) echo "Fail2ban" ;; SRV02) echo "Пользователь и sudo" ;; SRV05) echo "SSH-hardening" ;; SRV07) echo "UFW" ;; SRV09) echo "Swap" ;; SRV11) echo "DNS-over-TLS" ;; SRV13) echo "Блок-лист AS РКН" ;; SRV15) echo "Диагностика VPS" ;;
-        PREP_W1) echo "Дальше: пункт 3 (nginx и сертификаты: сначала сертификаты, затем запуск)." ;;
-        PREP_W2) echo "Не забудьте: A-записи поддоменов -> ваш статический IP, проброс 80/443 на роутере." ;;
+        SRV01) echo "Часовой пояс" ;;
+        SRV02) echo "BBR, IPv6, DNS" ;;
+        SRV03) echo "Перезагрузка по расписанию" ;;
+        SRV04) echo "Политика паролей" ;;
+        SRV05) echo "Создание пользователя" ;;
+        SRV06) echo "Настройки SSH" ;;
+        SRV07) echo "Настройки UFW" ;;
+        SRV10) echo "Swap (подкачка)" ;;
+        SRV11) echo "Логирование sudo" ;;
+        SRV12) echo "Fail2ban" ;;
+        SRV13) echo "Автообновления (unattended)" ;;
+        SRV14) echo "Почта root (SMTP)" ;;
+        SRV15) echo "История shell" ;;
+        SRV16) echo "Диагностика VPS" ;;
     esac
 }
+
 lang_menu() {
+    clear
     echo "${c_txt}Язык интерфейса / Interface language:${c_off}"
     echo "${c_txt} 1. Русский (по умолчанию)${c_off}"
     echo "${c_txt} 2. English${c_off}"
@@ -165,24 +150,19 @@ lang_menu() {
     [[ -f "$ENV_FILE" ]] && update_env LANG_UI "$LANG_UI"
     if [[ "$LANG_UI" == "en" ]]; then log "Language set to English."; else log "Установлен русский язык."; fi
 }
+
 onoff() { [[ "$1" == "true" ]] && echo "вкл" || echo "выкл"; }
-safe_descr() { case "$1" in 0) echo "выкл" ;; 2) echo "строгий" ;; *) echo "умеренный" ;; esac; }
-load_env() { set -a;
-    source "$ENV_FILE"; set +a; }
-has_forbidden() {
-    printf '%s' "$1" | grep -q "[\"'|/\$\\& ]"
-}
-forbidden_json() {
-    printf '%s' "$1" | grep -q "[\"'\\\\]"
-}
+load_env() { set -a; source "$ENV_FILE"; set +a; }
+has_forbidden() { printf '%s' "$1" | grep -q "[\"'|/\$\\& ]"; }
 update_env() {
     if has_forbidden "$2"; then
-        die "update_env: небезопасное значение для $1: '$2' (пробелы, кавычки, |, \\, \$, & не поддерживаются)"
+        die "update_env: небезопасное значение для $1: '$2'"
     fi
     if grep -q "^$1=" "$ENV_FILE" 2>/dev/null; then
         sed -i "s|^$1=.*|$1=$2|" "$ENV_FILE"
-    else echo "$1=$2" >> "$ENV_FILE"; fi; }
-trap 'die "сбой на строке $LINENO — состояние не повреждено, можно повторить пункт."' ERR
+    else echo "$1=$2" >> "$ENV_FILE"; fi;
+}
+trap 'die "сбой на строке $LINENO"' ERR
 
 print_menu() {
     clear
@@ -208,26 +188,22 @@ ${c_mag}$(_t MHDR)${c_off}
  ${c_num}17.${c_off} ${c_txt}$(_t M17)${c_off}
  ${c_num}18.${c_off} ${c_txt}$(_t M18)${c_off}
  ${c_num}19.${c_off} ${c_txt}$(_t M19)${c_off}
+ ${c_num}20.${c_off} ${c_txt}$(_t M20)${c_off}
+ ${c_num}21.${c_off} ${c_txt}$(_t M21)${c_off}
+ ${c_num}22.${c_off} ${c_txt}$(_t M22)${c_off}
 ${c_txt}$(_t MQ)${c_off}
 ${c_mag}$(_t MFTR)${c_off}
 MENU
 }
-
-if [[ "${DEMO:-0}" == "1" ]]; then
-    LANG_UI="${LANG_UI:-ru}"
-    print_menu
-    echo "${c_txt}(DEMO=1: предпросмотр оформления. Установка — на Debian/Ubuntu под root, без DEMO.)${c_off}"
-    exit 0
-fi
 
 preflight() {
     if [[ $EUID -ne 0 ]]; then
         printf '\033[1;31m[ОШИБКА]\033[0m запустите от root: sudo bash %s\n' "$0" >&2
         exit 1
     fi
-    [[ ${BASH_VERSINFO[0]:-0} -ge 4 ]] || { echo "нужен bash >= 4 (у вас: $BASH_VERSION)" >&2; exit 1; }
-    command -v systemctl >/dev/null 2>&1 || { echo "нужен systemd (systemctl не найден)" >&2; exit 1; }
-    [[ -r /etc/os-release ]] || { echo "не найден /etc/os-release — поддерживаются Debian/Ubuntu" >&2; exit 1; }
+    [[ ${BASH_VERSINFO[0]:-0} -ge 4 ]] || { echo "нужен bash >= 4" >&2; exit 1; }
+    command -v systemctl >/dev/null 2>&1 || { echo "нужен systemd" >&2; exit 1; }
+    [[ -r /etc/os-release ]] || { echo "не найден /etc/os-release" >&2; exit 1; }
     local os_id os_like
     os_id="$(. /etc/os-release && echo "$ID")"
     os_like="$(. /etc/os-release && echo "${ID_LIKE:-}")"
@@ -235,699 +211,518 @@ preflight() {
         *" debian "*|*" ubuntu "*) ;;
         *) echo "поддерживаются Debian/Ubuntu (обнаружен: $os_id)" >&2; exit 1 ;;
     esac
-    command -v curl >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq curl; }
-    command -v openssl >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq openssl; }
-    if ! curl -fsI --max-time 5 https://download.docker.com >/dev/null 2>&1; then
-        warn "download.docker.com недоступен — проверьте сеть/прокси до пункта 0."
-    fi
+    require_cmd curl curl
+    require_cmd openssl openssl
 }
 preflight
 
 cd "$CONFIG_ROOT" 2>/dev/null || { mkdir -p "$CONFIG_ROOT"; cd "$CONFIG_ROOT"; }
 
-
-
-
-
-
-
-show_logs() {
-    local c
-    for c in "$@"; do
-        if [[ -z "$(docker compose ps -q "$c" 2>/dev/null)" ]]; then
-            warn "$c: $(_t LOGS_NOTRUN)"
-            continue
-        fi
-        echo "${c_txt}===== $c $(_t LOGS_TAIL) =====${c_off}"
-        docker compose logs --tail=50 "$c" 2>&1 | tail -n 50
-        echo
-    done
-    read -rp "$(_t BACK_SETTINGS)" _ || true
-}
-logs_menu() {
-    local -a cs=("$@")
-    while true; do
-        clear
-        echo; echo "$(_t LOGS_TITLE)"
-        local i
-        for i in "${!cs[@]}"; do printf '  %d) %s\n' "$((i+1))" "${cs[$i]}"; done
-        echo "${c_txt}  a) $(_t LOGS_ALL)${c_off}"
-        local n
-        read -rp "$(_t LOGS_NUM)" n || true
-        case "$n" in
-            0) return 0 ;;
-            a|A|ф|Ф) show_logs "${cs[@]}" ;;
-            *)
-                if [[ "$n" =~ ^[0-9]+$ && "$n" -ge 1 && "$n" -le ${#cs[@]} ]]; then
-                    show_logs "${cs[$((n-1))]}"
-                else warn "$(_t LOGS_BAD)"; fi ;;
-        esac
-    done
-}
-wait_container() {
-    local name="$1"; shift
-    for _ in $(seq 1 30); do
-        if docker compose exec -T "$name" "$@" >/dev/null 2>&1; then
-            log "$name отвечает."; return 0
-        fi
-        sleep 2
-    done
-    warn "$name не отвечает за 60с — смотрите логи (L в меню сервиса) или docker compose logs $name"
-}
-
-
-
-update_service() {
-    local name="$1"; shift
-    log "Обновляю: $name"
-    log "  docker compose pull $*"
-    docker compose pull "$@"
-    docker compose up -d "$@"
-    log "Контейнеры пересозданы с новыми образами (если они обновились)."
-    if ask_yn "Показать логи обновлённых контейнеров для проверки?"; then
-        show_logs "$@"
-    fi
-}
-
-updates_menu() {
-    ensure_prepared
-    local -a names=( "nginx (фасад)" "CouchDB (Obsidian)" "Radicale (CalDAV)" "SFTPGo" "Syncthing" \
-                     "Matrix + TURN" "Luanti" "SearXNG" "Excalidraw" "Etherpad" "Mumble" \
-                     "ClassQuiz" "LimeSurvey" "Netdata" "Gitea" "Jitsi" )
-    local -a svcs_list=( "nginx" "couchdb" "radicale" "sftpgo sftpgo-db" "syncthing" \
-                         "matrix coturn" "luanti" "searxng" "excalidraw excalidraw-room excalidraw-storage" \
-                         "etherpad etherpad-db" "mumble" \
-                         "classquiz-frontend classquiz-api classquiz-worker classquiz-db classquiz-redis classquiz-meili" \
-                         "limesurvey limesurvey-db" "netdata socket-proxy" "gitea gitea-db" )
-
-    while true; do
-        clear
-        local -a idx=() i sc running
-        echo; echo " --- Обновления: развёрнутые сервисы ---"
-        for i in "${!names[@]}"; do
-            read -ra sc <<< "${svcs_list[$i]}"
-            if docker compose ps -a -q "${sc[@]}" 2>/dev/null | grep -q .; then
-                idx+=("$i")
-                running=$(docker compose ps -q "${sc[@]}" 2>/dev/null | grep -c . || true)
-                printf '  %d) %-20s (%s/%s контейнеров работает)\n' "${#idx[@]}" "${names[$i]}" "$running" "${#sc[@]}"
-            fi
-        done
-        if [[ ${#idx[@]} -eq 0 ]]; then
-            warn "ни одного контейнера не найдено — сначала установите сервисы (пункты 1-12)."
-            return 0
-        fi
-        echo "${c_txt}  a) обновить ВСЁ разом (docker compose pull && up -d)${c_off}"
-        echo "${c_txt}  c) очистить повисшие слои образов (docker image prune -f)${c_off}"
-        local n
-        read -rp "$(_t PROMPT_UPD)" n || true
-        case "$n" in
-            0) return 0 ;;
-            c|C|с|С)
-                docker image prune -f
-                docker system df ;;
-            a|A|ф|Ф)
-                log "Обновляю всё: pull + up -d по всем сервисам."
-                docker compose pull
-                docker compose up -d
-                log "Готово. При проблемах повторяйте по одному сервису — так проще найти виновника." ;;
-            *)
-                if [[ "$n" =~ ^[0-9]+$ && "$n" -ge 1 && "$n" -le ${#idx[@]} ]]; then
-                    local pick="${idx[$((n-1))]}"
-                    read -ra sc <<< "${svcs_list[$pick]}"
-                    update_service "${names[$pick]}" "${sc[@]}"
-                else
-                    warn "нет такого номера"
-                fi ;;
-        esac
-    done
-}
-
-f2b_jail_state() {
-    fail2ban-client status "$1" >/dev/null 2>&1 && echo "✔ jail '$1' активен" || echo "jail '$1' выкл"
-}
-
-f2b_apply() {
-    local enabled="$1" bantime="$2" maxretry="$3" findtime="$4" recidive="$5" nginx_jail="$6"; shift 6; local ssh_port="${1:-ssh}"
-    local recidive_block=""
-    [[ "$recidive" == "true" ]] && recidive_block='[recidive]
-enabled  = true
-logpath  = /var/log/fail2ban.log
-banaction = iptables-multiport
-bantime  = 604800
-findtime = 86400
-maxretry = 3'
-    local nginx_block=""
-    [[ "$nginx_jail" == "true" ]] && nginx_block="# nginx опубликован через docker -> бан только в цепочке DOCKER-USER
-[nginx-http-auth]
-enabled  = true
-port     = http,https
-logpath  = /opt/homeserver/data/nginx-logs/error.log
-chain    = DOCKER-USER
-maxretry = 3
-
-[nginx-limit-req]
-enabled  = true
-port     = http,https
-logpath  = /opt/homeserver/data/nginx-logs/error.log
-chain    = DOCKER-USER
-filter   = nginx-limit-req
-maxretry = 10"
-    cat > /etc/fail2ban/jail.d/99-homeserver.local <<EOF
-[DEFAULT]
-bantime   = $bantime
-findtime  = $findtime
-maxretry  = $maxretry
-backend   = auto
-banaction = iptables-multiport
-
-[sshd]
-enabled = $enabled
-port    = $ssh_port
-logpath = /var/log/auth.log
-
-$recidive_block
-
-$nginx_block
-EOF
-    systemctl enable --now fail2ban >/dev/null 2>&1
-    systemctl restart fail2ban
-    log "fail2ban перезапущен с новой конфигурацией:"
-    fail2ban-client status 2>/dev/null | sed 's/^/  /' || warn "fail2ban-client не отвечает — смотрите логи (journalctl -u fail2ban)."
-}
-
-
-run_update_upgrade() {
-    echo "${c_txt}Обновление системы...${c_off}"
-    apt update -y
-    apt upgrade -y
-    apt autoremove -y
-    apt autoclean -y
-    log "Обновление системы завершено!"
-    read -rp "Enter — продолжить " _ || true
-}
-
-setup_network() {
-    echo "${c_txt}Настройка сети...${c_off}"
-    echo "${c_txt}Установка и настройка systemd-resolved...${c_off}"
-    apt install -y systemd-resolved
-    tee /etc/systemd/resolved.conf >/dev/null <<EOF
-[Resolve]
-DNS=1.1.1.1 8.8.8.8 1.0.0.1 8.8.4.4
-Domains=~.
-DNSSEC=yes
-DNSOverTLS=yes
-EOF
-    systemctl enable systemd-resolved.service
-    systemctl start systemd-resolved.service
-    systemctl restart systemd-resolved.service
-    echo "${c_txt}Настройка BBR и отключение IPv6...${c_off}"
-    grep -q "net.core.default_qdisc = fq" /etc/sysctl.conf || echo "net.core.default_qdisc = fq" >> /etc/sysctl.conf
-    grep -q "net.ipv4.tcp_congestion_control = bbr" /etc/sysctl.conf || echo "net.ipv4.tcp_congestion_control = bbr" >> /etc/sysctl.conf
-    grep -q "net.ipv6.conf.all.disable_ipv6 = 1" /etc/sysctl.conf || echo "net.ipv6.conf.all.disable_ipv6 = 1" >> /etc/sysctl.conf
-    grep -q "net.ipv6.conf.default.disable_ipv6 = 1" /etc/sysctl.conf || echo "net.ipv6.conf.default.disable_ipv6 = 1" >> /etc/sysctl.conf
-    grep -q "net.ipv6.conf.lo.disable_ipv6 = 1" /etc/sysctl.conf || echo "net.ipv6.conf.lo.disable_ipv6 = 1" >> /etc/sysctl.conf
-    sysctl -p
-    log "Настройки сети завершены!"
-    read -rp "Enter — продолжить " _ || true
-}
+# ========== ФУНКЦИИ НАСТРОЙКИ СЕРВЕРА ==========
 
 setup_timezone() {
-    echo "${c_txt}=== Настройка часового пояса ===${c_off}"
+    clear
+    echo "${c_txt}=== Часовой пояс ===${c_off}"
     local current_tz
-    current_tz=$(timedatectl show --property=Timezone --value 2>/dev/null || timedatectl | grep "Time zone" | awk '{print $3}')
-    echo "${c_txt}Текущий часовой пояс: ${current_tz}${c_off}"
-    echo ""
-    echo "${c_txt}Популярные часовые пояса:${c_off}"
-    echo "  Europe/Moscow     — Москва"
-    echo "  Europe/Kiev       — Киев"
-    echo "  Europe/Minsk      — Минск"
-    echo "  Europe/Berlin     — Берлин"
-    echo "  Europe/London     — Лондон"
-    echo "  America/New_York  — Нью-Йорк"
-    echo "  Asia/Almaty       — Алматы"
-    echo "  Asia/Tashkent     — Ташкент"
-    echo ""
-    echo "${c_txt}Полный список: timedatectl list-timezones${c_off}"
-    echo ""
-    local new_tz
-    new_tz=$(ask "Новый часовой пояс" "")
-    if [[ -n "$new_tz" ]]; then
-        if timedatectl set-timezone "$new_tz" 2>/dev/null; then
-            log "Часовой пояс установлен: $new_tz"
-        else
-            warn "Ошибка: не удалось установить часовой пояс '$new_tz'"
-            warn "Проверьте написание. Список: timedatectl list-timezones"
-        fi
-    else
-        warn "Изменения отменены."
-    fi
-    read -rp "Enter — продолжить " _ || true
+    current_tz=$(timedatectl show --property=Timezone --value 2>/dev/null || echo '?')
+    echo "Текущий: $current_tz"
+    local new_tz; new_tz=$(ask "Новый часовой пояс (IANA, напр. Europe/Moscow)" "$current_tz")
+    timedatectl set-timezone "$new_tz" && log "Установлено: $new_tz"
 }
 
-setup_auto_reboot() {
-    echo "${c_txt}=== Автоматическая перезагрузка по расписанию ===${c_off}"
-    local current_reboot
-    current_reboot=$(crontab -l 2>/dev/null | grep "/sbin/reboot" || echo "не настроено")
-    echo "${c_txt}Текущее расписание перезагрузки: ${current_reboot}${c_off}"
-    echo ""
-    echo "  1. Ежедневно"
-    echo "  2. Еженедельно"
-    echo "  3. Ежемесячно"
-    echo "  4. Отключить автоперезагрузку"
-    echo ""
-    local freq; freq=$(ask "Частота" "")
-    case $freq in
-        4)
-            crontab -l 2>/dev/null | grep -v "/sbin/reboot" | crontab - 2>/dev/null || true
-            log "Автоперезагрузка отключена"
-            ;;
-        1|2|3)
-            local hour minute cron_expr desc dow dom
-            hour=$(ask "Час перезагрузки (0-23)" "")
-            if ! [[ "$hour" =~ ^[0-9]+$ ]] || [ "$hour" -lt 0 ] || [ "$hour" -gt 23 ]; then
-                warn "Некорректный час. Отменено."
-                read -rp "Enter — продолжить " _ || true
-                return 0
-            fi
-            minute=$(ask "Минуты (0-59)" "")
-            if ! [[ "$minute" =~ ^[0-9]+$ ]] || [ "$minute" -lt 0 ] || [ "$minute" -gt 59 ]; then
-                warn "Некорректные минуты. Отменено."
-                read -rp "Enter — продолжить " _ || true
-                return 0
-            fi
-            case $freq in
-                1) cron_expr="$minute $hour * * *"; desc="Ежедневно в $hour:$(printf '%02d' "$minute")" ;;
-                2)
-                    echo "Выберите день недели:"
-                    echo "  1 — Понедельник"; echo "  2 — Вторник"; echo "  3 — Среда"
-                    echo "  4 — Четверг"; echo "  5 — Пятница"; echo "  6 — Суббота"; echo "  7 — Воскресенье"
-                    dow=$(ask "День" "")
-                    if ! [[ "$dow" =~ ^[1-7]$ ]]; then
-                        warn "Некорректный день. Отменено."
-                        read -rp "Enter — продолжить " _ || true
-                        return 0
-                    fi
-                    cron_expr="$minute $hour * * $dow"
-                    desc="Еженедельно, день $dow в $hour:$(printf '%02d' "$minute")"
-                    ;;
-                3)
-                    dom=$(ask "День месяца (1-28)" "")
-                    if ! [[ "$dom" =~ ^[0-9]+$ ]] || [ "$dom" -lt 1 ] || [ "$dom" -gt 28 ]; then
-                        warn "Некорректный день месяца. Отменено."
-                        read -rp "Enter — продолжить " _ || true
-                        return 0
-                    fi
-                    cron_expr="$minute $hour $dom * *"
-                    desc="Ежемесячно, $dom-го числа в $hour:$(printf '%02d' "$minute")"
-                    ;;
-            esac
-            crontab -l 2>/dev/null | grep -v "/sbin/reboot" | crontab - 2>/dev/null || true
-            ( crontab -l 2>/dev/null; echo "$cron_expr /sbin/reboot" ) | crontab -
-            log "Расписание установлено: $desc"
-            log "Cron: $cron_expr /sbin/reboot"
-            ;;
-        *)
-            warn "Неверный выбор!"
-            ;;
+setup_network_bbr_ipv6_dns() {
+    clear
+    while true; do
+        echo "${c_txt}=== BBR, IPv6, DNS ===${c_off}"
+        echo "  1. BBR (ускорение TCP): $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '?')"
+        echo "  2. IPv6: $([ -f /etc/sysctl.d/99-homeserver-ipv6.conf ] && echo 'отключён' || echo 'включён')"
+        echo "  3. DNS-over-TLS: $([ -f /etc/systemd/resolved.conf.d/99-homeserver.conf ] && echo 'включён (Cloudflare)' || echo 'выкл')"
+        echo "  0. Назад"
+        read -rp "Номер: " c || true
+        case "$c" in
+            1)
+                if ! modprobe tcp_bbr 2>/dev/null; then warn "модуль tcp_bbr недоступен"; continue; fi
+                printf 'net.core.default_qdisc=fq\nnet.ipv4.tcp_congestion_control=bbr\n' > /etc/sysctl.d/99-homeserver-bbr.conf
+                sysctl -q -p /etc/sysctl.d/99-homeserver-bbr.conf
+                log "BBR включён: $(sysctl -n net.ipv4.tcp_congestion_control)" ;;
+            2)
+                local f=/etc/sysctl.d/99-homeserver-ipv6.conf
+                if [[ -f "$f" ]]; then
+                    ask_yn "IPv6 отключён — включить?" && { rm -f "$f"; sysctl -q -p; log "IPv6 включён"; }
+                else
+                    warn "Отключение IPv6 решит вопрос AAAA-записей"
+                    ask_yn "Отключить IPv6?" || continue
+                    printf 'net.ipv6.conf.all.disable_ipv6=1\nnet.ipv6.conf.default.disable_ipv6=1\nnet.ipv6.conf.lo.disable_ipv6=1\n' > "$f"
+                    sysctl -q -p "$f" && log "IPv6 отключён"
+                fi ;;
+            3)
+                local f=/etc/systemd/resolved.conf.d/99-homeserver.conf
+                if [[ -f "$f" ]]; then
+                    ask_yn "DoT включён — отключить?" && { rm -f "$f"; systemctl restart systemd-resolved; log "DoT отключён"; }
+                else
+                    require_cmd resolvectl systemd
+                    mkdir -p /etc/systemd/resolved.conf.d
+                    # Удаление симлинка и создание статичного файла
+                    rm -f /etc/resolv.conf
+                    cat > /etc/resolv.conf <<EOF
+# Статический resolv.conf (не управляется systemd-resolved)
+nameserver 1.1.1.1
+nameserver 9.9.9.9
+nameserver 8.8.8.8
+EOF
+                    chmod 644 /etc/resolv.conf
+                    # DoT через systemd-resolved
+                    printf '[Resolve]\nDNS=1.1.1.1#cloudflare-dns.com 9.9.9.9#dns.quad9.net 8.8.8.8#dns.google\nDNSOverTLS=opportunistic\nDomains=~.\n' > "$f"
+                    systemctl restart systemd-resolved
+                    log "DoT включён (Cloudflare, Quad9, Google)"
+                fi ;;
+            0) return 0 ;;
+            *) warn "нет такого пункта" ;;
+        esac
+    done
+}
+
+setup_scheduled_reboot() {
+    clear
+    require_cmd crontab cron
+    echo "${c_txt}=== Перезагрузка по расписанию ===${c_off}"
+    local cron=/etc/cron.d/homeserver-reboot
+    echo "Текущее: $(cat "$cron" 2>/dev/null | grep -v '^#' || echo 'нет')"
+    echo "  1. Выключить"
+    echo "  2. Еженедельно (пн 05:00)"
+    echo "  3. Ежемесячно (1-е число 05:00)"
+    case "$(ask "1/2/3" "2")" in
+        1) rm -f "$cron"; log "выключено" ;;
+        3) printf '0 5 1 * * root /sbin/reboot\n' > "$cron"; log "ежемесячно" ;;
+        *) printf '0 5 * * 1 root /sbin/reboot\n' > "$cron"; log "еженедельно" ;;
     esac
-    read -rp "Enter — продолжить " _ || true
 }
 
 configure_password_policy() {
-    echo "${c_txt}=== Настройка политики паролей ===${c_off}"
+    clear
+    echo "${c_txt}=== Политика паролей ===${c_off}"
+    require_cmd pam_pwquality libpam-pwquality
     local pam_file="/etc/pam.d/common-password"
-    local pwquality_conf="/etc/security/pwquality.conf"
-    apt-get install -y libpam-pwquality
     sed -i '/pam_pwquality.so/d' "$pam_file"
-    echo 'password requisite pam_pwquality.so retry=3 minlen=12 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 enforce_for_root' >> "$pam_file"
-    cat > "$pwquality_conf" <<EOF
-minlen = 12
-ucredit = -1
-lcredit = -1
-dcredit = -1
-ocredit = -1
-EOF
-    pam-auth-update --force
-    log "Политика паролей настроена."
-    warn "Если пользователь уже создан — смените ему пароль, чтобы политика вступила в силу."
-    read -rp "Enter — продолжить " _ || true
+    echo 'password requisite pam_pwquality.so retry=3 minlen=12 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1' >> "$pam_file"
+    log "Политика: мин. 12 символов, верхний/нижний/цифры/спецсимволы"
 }
 
 create_user() {
-    echo "${c_txt}Создание нового пользователя...${c_off}"
+    clear
+    echo "${c_txt}=== Создание пользователя ===${c_off}"
     local username; username=$(ask "Имя пользователя" "")
+    [[ -z "$username" ]] && return 0
     if id "$username" >/dev/null 2>&1; then
-        warn "Пользователь $username уже существует!"
+        warn "пользователь $username уже существует"
     else
         useradd -m -s /bin/bash "$username"
         passwd "$username"
         usermod -aG sudo "$username"
-        log "Пользователь $username создан и добавлен в группу sudo"
+        log "Пользователь $username создан"
     fi
-    read -rp "Enter — продолжить " _ || true
 }
 
-setup_ufw() {
-    echo "${c_txt}Настройка UFW...${c_off}"
-    local port; port=$(ask "Введите ваш SSH порт" "")
-    ufw --force reset
-    ufw limit "$port/tcp" comment 'SSH'
-    ufw allow 443/tcp comment 'WEB'
-    ufw --force enable
-    log "Настройки UFW завершены!"
-    read -rp "Enter — продолжить " _ || true
-}
-
-block_rkn() {
-    echo "${c_txt}Блокировка IP-адресов РКН...${c_off}"
-    cat > add_blacklist.sh <<'EOF'
-wget -O blacklist.txt https://raw.githubusercontent.com/C24Be/AS_Network_List/main/blacklists/blacklist.txt
-if [[ ! -f blacklist.txt ]]; then
-echo "Файл blacklist.txt не найден!"
-exit 1
-fi
-while read -r subnet; do
-ufw deny from "$subnet"
-done < blacklist.txt
-ufw status
-EOF
-    chmod +x add_blacklist.sh
-    log "Запускаем add_blacklist.sh..."
-    ./add_blacklist.sh
-    if ! crontab -l 2>/dev/null | grep -q "add_blacklist.sh"; then
-        ( crontab -l 2>/dev/null; echo "0 3 * * * $(pwd)/add_blacklist.sh" ) | crontab -
-        log "Задание добавлено в crontab: ежедневно в 3:00"
-    else
-        warn "Задание уже существует в crontab"
-    fi
-    log "Настройка ufw под РКН завершена!"
-    read -rp "Enter — продолжить " _ || true
-}
-
-add_swap() {
-    echo "${c_txt}Добавление swap файла...${c_off}"
-    local swapfile="/swapfile"
-    if [[ -f "$swapfile" ]]; then
-        warn "Swap файл уже существует"
-    else
-        dd if=/dev/zero of=$swapfile bs=1M count=1024
-        chmod 600 $swapfile
-        mkswap $swapfile
-        swapon $swapfile
-        echo "$swapfile none swap sw 0 0" >> /etc/fstab
-        log "1Гб подкачки создан и активирован"
-    fi
-    read -rp "Enter — продолжить " _ || true
-}
-
-enable_sudo_logging() {
-    local sudoers_file="/etc/sudoers"
-    sed -i '/Defaults logfile/d' "$sudoers_file"
-    echo 'Defaults logfile="/var/log/sudo.log"' >> "$sudoers_file"
-    if visudo -cf "$sudoers_file" >/dev/null; then
-        log "Sudo logging enabled. Logs will be in /var/log/sudo.log"
-    else
-        warn "Failed to configure sudo logging"
-    fi
-    read -rp "Enter — продолжить " _ || true
-}
-
-fail2ban_menu() {
-    if ! command -v fail2ban-client >/dev/null 2>&1; then
-        ask_yn "fail2ban не установлен. Установить?" || return 0
-        apt-get update -qq && apt-get install -y -qq fail2ban
-    fi
-    [[ -f "$ENV_FILE" ]] && load_env
-    local f2b_enabled="${F2B_ENABLED:-true}" bantime="${F2B_BANTIME:-3600}" \
-          maxretry="${F2B_MAXRETRY:-5}" findtime="${F2B_FINDTIME:-600}" \
-          recidive="${F2B_RECIDIVE:-true}" nginx_jail="${F2B_NGINX:-true}" \
-          ssh_port="${F2B_SSH_PORT:-ssh}"
-
+ssh_settings_menu() {
+    clear
     while true; do
-        clear
-        cat <<SUM
-
-${c_mag} --- Fail2ban --- ${c_off}
-${c_mag} --- Текущие использованные порты --- ${c_off}
-${c_txt}  Порт          Сервис
-  22/tcp        SSH
-  80/tcp        nginx
-  443/tcp       nginx
-  2022/tcp      SFTPGo
-  22000/tcp+udp Syncthing
-  21027/udp     Syncthing
-  30000/udp     Luanti
-  3478/tcp+udp  coturn
-  64738/tcp+udp Mumble
-  19999/tcp     netdata
-  10000/udp     Jitsi${c_off}
-
-${c_mag} --- Настройки --- ${c_off}
-  ${c_num}1.${c_off} ${c_txt}SSH: $(onoff "$f2b_enabled")${c_off}
-  ${c_num}2.${c_off} ${c_txt}bantime, с: $bantime${c_off}
-  ${c_num}3.${c_off} ${c_txt}maxretry: $maxretry${c_off}
-  ${c_num}4.${c_off} ${c_txt}findtime, с: $findtime${c_off}
-  ${c_num}5.${c_off} ${c_txt}Recidive: $(onoff "$recidive")${c_off}
-  ${c_num}6.${c_off} ${c_txt}Jail nginx: $(onoff "$nginx_jail")${c_off}
-  ${c_num}7.${c_off} ${c_txt}SSH-порт: $ssh_port${c_off}
-  ${c_num}8.${c_off} ${c_txt}Применить и перезапустить${c_off}
-  ${c_num}9.${c_off} ${c_txt}Логи${c_off}
-  ${c_num}0.${c_off} ${c_txt}Назад${c_off}
-
-SUM
-        read -rp "Номер пункта: " c || true
+        echo "${c_txt}=== Настройки SSH ===${c_off}"
+        echo "  1. Изменить SSH-порт"
+        echo "  2. Добавить SSH-ключ"
+        echo "  0. Назад"
+        read -rp "Номер: " c || true
         case "$c" in
-            1) [[ "$f2b_enabled" == "true" ]] && f2b_enabled="false" || f2b_enabled="true" ;;
+            1)
+                require_cmd ufw ufw
+                local port; port=$(ask "Новый SSH-порт" "22")
+                [[ "$port" =~ ^[0-9]+$ && "$port" -ge 1 && "$port" -le 65535 ]] || { warn "некорректный порт"; continue; }
+                ufw allow "$port/tcp" comment 'SSH' >/dev/null
+                ufw reload >/dev/null
+                # Обновляем sshd_config
+                local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
+                mkdir -p /etc/ssh/sshd_config.d
+                grep -q "^Port " "$cfg" 2>/dev/null && sed -i "s|^Port .*|Port $port|" "$cfg" || echo "Port $port" >> "$cfg"
+                systemctl reload ssh 2>/dev/null || systemctl reload sshd
+                log "SSH-порт изменён на $port" ;;
             2)
-                local bt; bt="$(ask "bantime, с" "$bantime")"
-                [[ "$bt" =~ ^[0-9]+$ && "$bt" -ge 60 ]] && bantime="$bt" || warn "нужно число >= 60 — оставляю $bantime" ;;
-            3)
-                local mr; mr="$(ask "maxretry" "$maxretry")"
-                [[ "$mr" =~ ^[0-9]+$ && "$mr" -ge 1 && "$mr" -le 50 ]] && maxretry="$mr" || warn "нужно число 1-50 — оставляю $maxretry" ;;
-            4)
-                local ft; ft="$(ask "findtime, с" "$findtime")"
-                [[ "$ft" =~ ^[0-9]+$ && "$ft" -ge 60 ]] && findtime="$ft" || warn "нужно число >= 60 — оставляю $findtime" ;;
-            5) [[ "$recidive" == "true" ]] && recidive="false" || recidive="true" ;;
-            6) [[ "$nginx_jail" == "true" ]] && nginx_jail="false" || nginx_jail="true" ;;
-            7)
-                local sp; sp="$(ask "SSH-порт (число или 'ssh')" "$ssh_port")"
-                [[ "$sp" =~ ^(ssh|[0-9]{1,5})$ ]] && ssh_port="$sp" || warn "нужно число или 'ssh' — оставляю $ssh_port" ;;
-            8)
-                [[ -f "$ENV_FILE" ]] && {
-                    update_env F2B_ENABLED "$f2b_enabled"; update_env F2B_BANTIME "$bantime"
-                    update_env F2B_MAXRETRY "$maxretry"; update_env F2B_FINDTIME "$findtime"
-                    update_env F2B_RECIDIVE "$recidive"; update_env F2B_NGINX "$nginx_jail"
-                    update_env F2B_SSH_PORT "$ssh_port"
-                }
-                f2b_apply "$f2b_enabled" "$bantime" "$maxretry" "$findtime" "$recidive" "$nginx_jail" "$ssh_port" ;;
-            9)
-                journalctl -u fail2ban --no-pager -n 30 2>/dev/null || tail -n 30 /var/log/fail2ban.log 2>/dev/null || warn "логи недоступны"
-                read -rp "Enter — продолжить " _ || true ;;
+                local username; username=$(ask "Имя пользователя" "")
+                [[ -z "$username" ]] && continue
+                id "$username" >/dev/null 2>&1 || { warn "пользователь не найден"; continue; }
+                local IP; IP="$(curl -fsS --max-time 5 ifconfig.me 2>/dev/null || echo '<IP>')"
+                echo "${c_mag}Создайте ключ на своём компьютере:${c_off}"
+                echo "${c_txt}ssh-keygen -t ed25519${c_off}"
+                echo "${c_mag}Загрузите ключ:${c_off}"
+                echo "${c_txt}ssh-copy-id -i ~/.ssh/id_ed25519.pub $username@$IP${c_off}"
+                echo "${c_mag}Проверьте вход ключом, затем нажмите Enter для отключения пароля${c_off}"
+                read -r
+                # Отключаем пароль
+                local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
+                mkdir -p /etc/ssh/sshd_config.d
+                grep -q "^PasswordAuthentication" "$cfg" 2>/dev/null && sed -i 's|^PasswordAuthentication.*|PasswordAuthentication no|' "$cfg" || echo "PasswordAuthentication no" >> "$cfg"
+                # Удаляем 50-cloud-init если есть
+                if [[ -f /etc/ssh/sshd_config.d/50-cloud-init.conf ]]; then
+                    mv /etc/ssh/sshd_config.d/50-cloud-init.conf "/etc/ssh/sshd_config.d/50-cloud-init.conf.disabled.$(date +%s)"
+                    log "50-cloud-init.conf отключён"
+                fi
+                systemctl reload ssh 2>/dev/null || systemctl reload sshd
+                log "Вход по паролю отключён" ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
         esac
     done
 }
 
-
-
-
-ssh_harden() {
-    echo "${c_txt}Настройка SSH...${c_off}"
-    local username; username="$(ask "Имя созданного пользователя (НЕ ROOT)")"
-    [[ -z "$username" ]] && { warn "имя обязательно"; return 1; }
-    id "$username" >/dev/null 2>&1 || warn "пользователь '$username' не найден — проверьте имя"
-
-    local port; port="$(ask "Новый SSH-порт" "22")"
-    [[ "$port" =~ ^[0-9]+$ && "$port" -ge 1 && "$port" -le 65535 ]] || die "некорректный порт: '$port'"
-
-    local IP; IP="$(curl -fsS --max-time 5 ifconfig.me 2>/dev/null || echo '<IP сервера>')"
-
-    echo "${c_mag}=======================================================================================${c_off}"
-    echo "${c_mag}ВНИМАТЕЛЬНО ПРОЧТИТЕ: сейчас вам нужно открыть терминал на своём компьютере${c_off}"
-    echo "${c_mag}И создать ssh-ключ для входа на сервер следующей командой:${c_off}"
-    echo "${c_txt}ssh-keygen -t ed25519${c_off}"
-    echo ""
-    echo "${c_mag}Загрузите ключ на сервер (команда для Linux):${c_off}"
-    echo "${c_txt}ssh-copy-id -i имяключа.pub $username@$IP${c_off}"
-    echo ""
-    echo "${c_mag}Команда для Windows:${c_off}"
-    echo "${c_txt}cat id_ed25519.pub | ssh $username@$IP mkdir -p && cat >> ~/.ssh/authorized_keys${c_off}"
-    echo ""
-    echo "${c_mag}Попробуйте подключиться к вашему серверу при помощи этого ключа:${c_off}"
-    echo "${c_txt}ssh -i имяключа $username@$IP${c_off}"
-    echo ""
-    echo "${c_mag}ТОЛЬКО ЕСЛИ ВХОД УСПЕШЕН, нажмите здесь Enter для ОТКЛЮЧЕНИЯ ВХОДА В SSH ПО ПАРОЛЮ${c_off}"
-    echo "${c_mag}=======================================================================================${c_off}"
-    read -r
-
-    local SSHD_CONFIG="/etc/ssh/sshd_config"
-    [[ -f "$SSHD_CONFIG" ]] || die "не найден $SSHD_CONFIG"
-    local BACKUP_FILE="/etc/ssh/sshd_config.backup_$(date +%Y%m%d_%H%M%S)"
-    cp "$SSHD_CONFIG" "$BACKUP_FILE"
-    log "Резервная копия: $BACKUP_FILE"
-
-    if ls /etc/ssh/sshd_config.d/99-homeserver.conf* >/dev/null 2>&1; then
-        warn "Найден старый drop-in 99-homeserver.conf — перемещаю в /root/ssh-fix-backup/"
-        mkdir -p /root/ssh-fix-backup
-        mv /etc/ssh/sshd_config.d/99-homeserver.conf* /root/ssh-fix-backup/ 2>/dev/null || true
-    fi
-
-    local k v
-    set_kv() {
-        k="$1"; v="$2"
-        if grep -q "^$k" "$SSHD_CONFIG"; then sed -i "s|^$k.*|$k $v|" "$SSHD_CONFIG"
-        else echo "$k $v" >> "$SSHD_CONFIG"; fi
-    }
-    set_kv PubkeyAuthentication yes
-    set_kv PasswordAuthentication no
-    set_kv GSSAPIAuthentication no
-    set_kv PermitRootLogin prohibit-password
-    local SSH_CONFIG="/etc/ssh/ssh_config"
-    if grep -q "^GSSAPIAuthentication" "$SSH_CONFIG" 2>/dev/null; then
-        sed -i 's/^GSSAPIAuthentication.*/GSSAPIAuthentication no/' "$SSH_CONFIG"
-    else echo "GSSAPIAuthentication no" >> "$SSH_CONFIG"; fi
-
-    mkdir -p /etc/ssh/sshd_config.d
-    cat > /etc/ssh/sshd_config.d/99-security-settings.conf <<EOF
-Port $port
-PermitRootLogin prohibit-password
-PubkeyAuthentication yes
-PasswordAuthentication no
-PermitEmptyPasswords no
-GSSAPIAuthentication no
-Protocol 2
-X11Forwarding no
-MaxAuthTries 3
-MaxSessions 5
-ClientAliveInterval 300
-ClientAliveCountMax 2
-UseDNS no
-ChallengeResponseAuthentication no
-KerberosAuthentication no
-EOF
-
-    if [[ -f /etc/ssh/sshd_config.d/50-cloud-init.conf ]]; then
-        ask_yn "Найден 50-cloud-init.conf (форсирует PasswordAuthentication) — отключить?" && {
-            mv /etc/ssh/sshd_config.d/50-cloud-init.conf "/etc/ssh/sshd_config.d/50-cloud-init.conf.disabled.$(date +%s)"
-            log "50-cloud-init.conf отключён (бэкап рядом)."
-        }
-    fi
-
-    mkdir -p "/home/$username/.ssh"
-    chmod 700 "/home/$username/.ssh"
-    chown -R "$username:$username" "/home/$username/.ssh"
-    if [[ -f "/home/$username/.ssh/authorized_keys" ]]; then
-        chmod 600 "/home/$username/.ssh/authorized_keys"
-        chown "$username:$username" "/home/$username/.ssh/authorized_keys"
-    fi
-
-    if ! sshd -t; then
-        warn "Ошибка в конфигурации SSH! Восстанавливаю из резервной копии..."
-        cp "$BACKUP_FILE" "$SSHD_CONFIG"
-        die "Конфигурация восстановлена из бэкапа. Разбирайтесь вручную."
-    fi
-
-    if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -qi "Status: active"; then
-        ufw limit "$port/tcp" comment 'SSH' >/dev/null 2>&1 || ufw allow "$port/tcp" >/dev/null
-        ufw delete allow OpenSSH >/dev/null 2>&1 || true
-        log "UFW: порт $port/tcp открыт (limit), правило OpenSSH удалено."
-    fi
-
-    if systemctl restart sshd 2>/dev/null; then
-        log "Служба SSH перезапущена (sshd)."
-    else
-        systemctl restart ssh && log "Служба SSH перезапущена (ssh)."
-    fi
-    log "SSH порт: $port | вход по паролю: ОТКЛЮЧЁН"
-    warn "Не закрывайте текущую сессию! Проверьте вход в новом окне: ssh -p $port $username@$IP"
-    read -rp "Enter — продолжить " _ || true
+ufw_settings_menu() {
+    clear
+    require_cmd ufw ufw
+    while true; do
+        echo "${c_txt}=== Настройки UFW ===${c_off}"
+        echo "  1. Изменить SSH-порт"
+        echo "  2. Блокировка ботов (abuse-ipset)"
+        echo "  3. Блокировка РКН"
+        echo "  0. Назад"
+        read -rp "Номер: " c || true
+        case "$c" in
+            1) ssh_settings_menu ;;
+            2) abuse_block_setup ;;
+            3) block_rkn ;;
+            0) return 0 ;;
+            *) warn "нет такого пункта" ;;
+        esac
+    done
 }
 
+abuse_block_setup() {
+    clear
+    require_cmd ipset ipset
+    local script=/opt/homeserver/abuse-block.sh cron=/etc/cron.d/homeserver-abuse
+    if [[ -f "$script" ]]; then
+        echo "Abuse-лист: активен ($(ipset list abuse4 2>/dev/null | grep -c '^[0-9]' || echo 0) сетей)"
+        ask_yn "Отключить и удалить?" && {
+            iptables -D INPUT -m set --match-set abuse4 src -j DROP 2>/dev/null
+            iptables -D DOCKER-USER -m set --match-set abuse4 src -j DROP 2>/dev/null
+            ipset destroy abuse4 2>/dev/null; rm -f "$script" "$cron"; log "Abuse-лист удалён."
+        }
+        return
+    fi
+    echo "Abuse-фид: список IP/сетей с плохой репутацией (сканеры, брутфорсеры, спамеры)."
+    echo "  1) dshield.netset — топ-20 атакующих /24 (рекомендуется)"
+    echo "  2) firehol_level1.netset — жёсткая агрегация (~30k записей)"
+    echo "  3) firehol_level2.netset — шире (~80k записей)"
+    echo "  4) свой URL"
+    local url
+    case "$(ask "1-4" "1")" in
+        2) url="https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level1.netset" ;;
+        3) url="https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level2.netset" ;;
+        4) url="$(ask "URL списка")" ;;
+        *) url="https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/dshield.netset" ;;
+    esac
+    cat > "$script" <<ABEOF
+#!/usr/bin/env bash
+set -e
+URL="$url"
+TMP="\$(mktemp)"
+curl -fsSL --max-time 300 "\$URL" -o "\$TMP"
+ipset create abuse4_tmp hash:net
+grep -E '^[0-9]' "\$TMP" | sed 's/^/add abuse4_tmp /' | ipset restore
+ipset create abuse4 hash:net 2>/dev/null || true
+ipset swap abuse4_tmp abuse4
+ipset destroy abuse4_tmp
+rm -f "\$TMP"
+iptables -C INPUT -m set --match-set abuse4 src -j DROP 2>/dev/null || iptables -I INPUT 1 -m set --match-set abuse4 src -j DROP
+iptables -C DOCKER-USER -m set --match-set abuse4 src -j DROP 2>/dev/null || iptables -I DOCKER-USER 1 -m set --match-set abuse4 src -j DROP 2>/dev/null || true
+ABEOF
+    chmod +x "$script"
+    "$script" || { rm -f "$script"; die "не удалось применить фид"; }
+    printf '@reboot root /opt/homeserver/abuse-block.sh\n17 4 * * * root /opt/homeserver/abuse-block.sh\n' > "$cron"
+    log "Abuse-лист применён, обновление ежедневно 4:17 + @reboot"
+}
 
+block_rkn() {
+    clear
+    require_cmd ipset ipset
+    local script=/opt/homeserver/rkn-block.sh cron=/etc/cron.d/homeserver-rkn
+    if [[ -f "$script" ]]; then
+        echo "Блок-лист РКН: активен"
+        ask_yn "Отключить?" && { rm -f "$script" "$cron"; log "удалён"; }
+        return
+    fi
+    cat > "$script" <<'RKNEOF'
+#!/usr/bin/env bash
+set -e
+URL="https://raw.githubusercontent.com/C24Be/AS_Network_List/main/firewall_rules/allow_single_ipv4.txt"
+TMP="$(mktemp)"
+curl -fsSL --max-time 300 "$URL" -o "$TMP"
+ipset create rkn4_tmp hash:net
+grep -E '^[0-9]' "$TMP" | sed 's/^/add rkn4_tmp /' | ipset restore
+ipset create rkn4 hash:net 2>/dev/null || true
+ipset swap rkn4_tmp rkn4
+ipset destroy rkn4_tmp
+rm -f "$TMP"
+iptables -C INPUT -m set --match-set rkn4 src -j DROP 2>/dev/null || iptables -I INPUT 1 -m set --match-set rkn4 src -j DROP
+RKNEOF
+    chmod +x "$script"
+    "$script"
+    printf '@reboot root /opt/homeserver/rkn-block.sh\n23 3 * * * root /opt/homeserver/rkn-block.sh\n' > "$cron"
+    log "Блок-лист РКН применён"
+}
 
+swap_menu() {
+    clear
+    while true; do
+        echo "${c_txt}=== Swap (подкачка) ===${c_off}"
+        echo "Статус:"
+        free -h | grep -i swap
+        swapon --show || echo "(нет активного swap)"
+        echo ""
+        echo "  1. Включить swap (выбрать размер)"
+        echo "  2. Отключить и удалить swap"
+        echo "  0. Назад"
+        read -rp "Номер: " c || true
+        case "$c" in
+            1)
+                local g; g=$(ask "Размер swap, ГБ" "2")
+                [[ "$g" =~ ^[0-9]+$ ]] || { warn "нужно число"; continue; }
+                if swapon --show=NAME --noheadings 2>/dev/null | grep -q /swapfile; then
+                    swapoff /swapfile && sed -i '\|^/swapfile |d' /etc/fstab && rm -f /swapfile
+                fi
+                fallocate -l "${g}G" /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=$((g*1024)) status=none
+                chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
+                grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+                echo 'vm.swappiness=10' > /etc/sysctl.d/99-homeserver-swap.conf
+                sysctl -q -p /etc/sysctl.d/99-homeserver-swap.conf
+                log "Swap ${g}ГБ активен" ;;
+            2)
+                if swapon --show=NAME --noheadings 2>/dev/null | grep -q /swapfile; then
+                    swapoff /swapfile && sed -i '\|^/swapfile |d' /etc/fstab && rm -f /swapfile
+                    log "Swap отключён и удалён"
+                else
+                    warn "Swap не активен"
+                fi ;;
+            0) return 0 ;;
+            *) warn "нет такого пункта" ;;
+        esac
+    done
+}
 
+sudo_logging_menu() {
+    clear
+    while true; do
+        echo "${c_txt}=== Логирование sudo ===${c_off}"
+        if [[ -f /etc/sudoers.d/99-homeserver-logging ]]; then
+            echo "Статус: ВКЛЮЧЕНО"
+            echo "Лог: /var/log/sudo.log"
+            if [[ -f /var/log/sudo.log ]]; then
+                echo "Последние записи:"
+                tail -n 10 /var/log/sudo.log
+            fi
+        else
+            echo "Статус: ВЫКЛЮЧЕНО"
+        fi
+        echo ""
+        echo "  1. Включить логирование"
+        echo "  2. Отключить логирование"
+        echo "  3. Открыть лог в редакторе"
+        echo "  0. Назад"
+        read -rp "Номер: " c || true
+        case "$c" in
+            1)
+                cat > /etc/sudoers.d/99-homeserver-logging <<'EOF'
+Defaults logfile=/var/log/sudo.log
+Defaults loglinelen=0
+EOF
+                visudo -cf /etc/sudoers.d/99-homeserver-logging >/dev/null && log "Логирование включено" ;;
+            2)
+                rm -f /etc/sudoers.d/99-homeserver-logging
+                log "Логирование отключено" ;;
+            3)
+                require_cmd nano nano
+                [[ -f /var/log/sudo.log ]] && nano /var/log/sudo.log || warn "лог не найден" ;;
+            0) return 0 ;;
+            *) warn "нет такого пункта" ;;
+        esac
+    done
+}
 
+fail2ban_menu() {
+    clear
+    require_cmd fail2ban-client fail2ban
+    while true; do
+        echo "${c_txt}=== Fail2ban ===${c_off}"
+        echo "Порты и защита:"
+        printf "  %-15s %-20s %s\n" "Порт" "Сервис" "Fail2ban"
+        printf "  %-15s %-20s %s\n" "---" "---" "---"
+        local ssh_port=$(grep "^Port " /etc/ssh/sshd_config.d/99-homeserver.conf 2>/dev/null | awk '{print $2}' || echo "22")
+        printf "  %-15s %-20s %s\n" "${ssh_port}/tcp" "SSH" "$(fail2ban-client status sshd 2>/dev/null | grep -q 'Currently' && echo '✔ активен' || echo 'выкл')"
+        printf "  %-15s %-20s %s\n" "80,443/tcp" "nginx" "$(fail2ban-client status nginx-http-auth 2>/dev/null | grep -q 'Currently' && echo '✔ активен' || echo 'выкл')"
+        echo ""
+        [[ -f "$ENV_FILE" ]] && load_env
+        local bantime="${F2B_BANTIME:-7200}" maxretry="${F2B_MAXRETRY:-10}" findtime="${F2B_FINDTIME:-900}"
+        echo "  1. bantime (время бана): ${bantime}с = $((bantime/3600))ч"
+        echo "  2. maxretry (попыток): $maxretry"
+        echo "  3. findtime (окно попыток): ${findtime}с = $((findtime/60))мин"
+        echo "  4. Применить и перезапустить"
+        echo "  0. Назад"
+        read -rp "Номер: " c || true
+        case "$c" in
+            1) bantime=$(ask "bantime, секунд (7200 = 2 часа)" "$bantime") ;;
+            2) maxretry=$(ask "maxretry (10)" "$maxretry") ;;
+            3) findtime=$(ask "findtime, секунд (900 = 15 мин)" "$findtime") ;;
+            4)
+                [[ -f "$ENV_FILE" ]] && {
+                    update_env F2B_BANTIME "$bantime"
+                    update_env F2B_MAXRETRY "$maxretry"
+                    update_env F2B_FINDTIME "$findtime"
+                }
+                cat > /etc/fail2ban/jail.d/99-homeserver.local <<EOF
+[DEFAULT]
+bantime   = $bantime
+findtime  = $findtime
+maxretry  = $maxretry
 
+[sshd]
+enabled  = true
+port     = $ssh_port
+logpath  = /var/log/auth.log
+EOF
+                systemctl enable --now fail2ban >/dev/null 2>&1
+                systemctl restart fail2ban
+                log "Fail2ban перезапущен" ;;
+            0) return 0 ;;
+            *) warn "нет такого пункта" ;;
+        esac
+    done
+}
 
+unattended_upgrades_setup() {
+    clear
+    echo "${c_txt}=== Автообновления (unattended-upgrades) ===${c_off}"
+    if dpkg -l unattended-upgrades 2>/dev/null | grep -q '^ii'; then
+        echo "Статус: УСТАНОВЛЕНО"
+        cat /etc/apt/apt.conf.d/20auto-upgrades 2>/dev/null || echo "(нет конфига)"
+        ask_yn "Отключить?" && {
+            apt-get remove -y unattended-upgrades
+            log "Удалено"
+        }
+    else
+        echo "Статус: НЕ УСТАНОВЛЕНО"
+        ask_yn "Установить автообновления security?" && {
+            apt-get install -y unattended-upgrades
+            printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' > /etc/apt/apt.conf.d/20auto-upgrades
+            log "Включено"
+        }
+    fi
+}
 
+root_mail_setup() {
+    clear
+    echo "${c_txt}=== Почта root (SMTP) ===${c_off}"
+    if command -v msmtp >/dev/null && grep -qs "account default" /etc/msmtprc 2>/dev/null; then
+        echo "Настроено:"
+        grep -E '^(host|port|from):' /etc/msmtprc | sed 's/^/  /'
+        ask_yn "Перенастроить?" || return
+    fi
+    require_cmd msmtp msmtp
+    echo "Внешний SMTP для оповещений cron/unattended-upgrades"
+    local host port user pass rcpt
+    host=$(ask "SMTP-хост" "smtp.yandex.ru")
+    port=$(ask "Порт (465/587)" "465")
+    user=$(ask "Логин (email)")
+    read -rsp "Пароль приложения: " pass; echo
+    rcpt=$(ask "Ящик получателя" "$user")
+    local starttls="off"; [[ "$port" == "587" ]] && starttls="on"
+    cat > /etc/msmtprc <<EOF
+defaults
+auth on
+tls on
+tls_starttls $starttls
+logfile /var/log/msmtp.log
 
+account default
+host $host
+port $port
+from $user
+user $user
+password $pass
+EOF
+    chmod 600 /etc/msmtprc
+    printf 'root: %s\n' "$rcpt" > /etc/aliases
+    log "Почта настроена: $host:$port -> $rcpt"
+}
 
+shell_history_setup() {
+    clear
+    echo "${c_txt}=== История shell ===${c_off}"
+    cat > /etc/profile.d/99-homeserver-history.sh <<'EOF'
+export HISTTIMEFORMAT="%F %T  "
+export HISTSIZE=100000
+export HISTFILESIZE=200000
+export HISTCONTROL=ignoredups:erasedups
+shopt -s histappend
+PROMPT_COMMAND="history -a; history -c; history -r${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+EOF
+    log "История настроена: 100k записей, метки времени"
+}
 
+diag_menu() {
+    clear
+    echo "${c_txt}=== Диагностика VPS ===${c_off}"
+    echo "  1) vps-audit (аудит защищённости)"
+    echo "  2) ipregion (регион IP)"
+    echo "  3) LemonBench (бенчмарк)"
+    echo "  0) Назад"
+    local n; n=$(ask "1-3" "")
+    case "$n" in
+        1) bash <(curl -fsSL https://raw.githubusercontent.com/hidden-refuge/vps-audit/main/vps-audit.sh) ;;
+        2) bash <(curl -fsSL https://raw.githubusercontent.com/uxh/sh/main/ipregion.sh) ;;
+        3) bash <(curl -fsSL https://raw.githubusercontent.com/LemonBench/LemonBench/main/LemonBench.sh) fast ;;
+    esac
+}
 
 server_menu() {
     [[ $EUID -eq 0 ]] || { warn "нужен root"; return 1; }
     while true; do
+        clear
         cat <<SUM
-$(_t SRV_TITLE)
+$(_t SRV01)
   ${c_num}1.${c_off} ${c_txt}$(_t SRV01)${c_off}
-  ${c_num}2.${c_off} ${c_txt}$(_t SRV02)${c_off}
-  ${c_num}3.${c_off} ${c_txt}$(_t SRV03)${c_off}
-  ${c_num}4.${c_off} ${c_txt}$(_t SRV04)${c_off}
-  ${c_num}5.${c_off} ${c_txt}$(_t SRV05)${c_off}
-  ${c_num}6.${c_off} ${c_txt}$(_t SRV06)${c_off}
-  ${c_num}7.${c_off} ${c_txt}$(_t SRV07)${c_off}
-  ${c_num}8.${c_off} ${c_txt}$(_t SRV08)${c_off}
-  ${c_num}9.${c_off} ${c_txt}$(_t SRV09)${c_off}
-  ${c_num}10.${c_off} ${c_txt}$(_t SRV10)${c_off}
-  ${c_num}11.${c_off} ${c_txt}$(_t SRV11)${c_off}
-  ${c_num}12.${c_off} ${c_txt}$(_t SRV12)${c_off}
+  ${c_num}2.${c_off} ${c_txt}$(_t SRV04)${c_off}
+  ${c_num}3.${c_off} ${c_txt}$(_t SRV05)${c_off}
+  ${c_num}4.${c_off} ${c_txt}$(_t SRV06)${c_off}
+  ${c_num}5.${c_off} ${c_txt}$(_t SRV07)${c_off}
+  ${c_num}6.${c_off} ${c_txt}$(_t SRV12)${c_off}
+  ${c_num}7.${c_off} ${c_txt}$(_t SRV02)${c_off}
+  ${c_num}8.${c_off} ${c_txt}$(_t SRV10)${c_off}
+  ${c_num}9.${c_off} ${c_txt}$(_t SRV11)${c_off}
+  ${c_num}10.${c_off} ${c_txt}$(_t SRV14)${c_off}
+  ${c_num}11.${c_off} ${c_txt}$(_t SRV15)${c_off}
+  ${c_num}12.${c_off} ${c_txt}$(_t SRV13)${c_off}
+  ${c_num}13.${c_off} ${c_txt}$(_t SRV03)${c_off}
+  ${c_num}14.${c_off} ${c_txt}$(_t SRV16)${c_off}
   ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 
 SUM
-        read -rp "$(_t PROMPT_BACK)" c || true
+        read -rp "Номер: " c || true
         case "$c" in
-            1) run_update_upgrade ;;
-            2) setup_network ;;
-            3) setup_timezone ;;
-            4) setup_auto_reboot ;;
-            5) configure_password_policy ;;
-            6) create_user ;;
-            7) ssh_harden ;;
-            8) setup_ufw ;;
-            9) block_rkn ;;
-            10) add_swap ;;
-            11) enable_sudo_logging ;;
-            12) fail2ban_menu ;;
+            1) setup_timezone ;;
+            2) configure_password_policy ;;
+            3) create_user ;;
+            4) ssh_settings_menu ;;
+            5) ufw_settings_menu ;;
+            6) fail2ban_menu ;;
+            7) setup_network_bbr_ipv6_dns ;;
+            8) swap_menu ;;
+            9) sudo_logging_menu ;;
+            10) root_mail_setup ;;
+            11) shell_history_setup ;;
+            12) unattended_upgrades_setup ;;
+            13) setup_scheduled_reboot ;;
+            14) diag_menu ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
         esac
     done
 }
-
-
-
-
-
-
-setup_backups() {
-    ensure_prepared
-    cat > "$CONFIG_ROOT/backup.sh" <<'BKP_EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-cd /opt/homeserver
-set -a; [ -f .env ] && . ./.env; set +a
-TS=$(date +%Y%m%d-%H%M)
-WORLDS="${LUANTI_WORLDS:-data/luanti/worlds}"
-docker compose stop couchdb matrix luanti sftpgo-db etherpad-db classquiz-db limesurvey-db 2>/dev/null || true
-tar czf "backups/homeserver-$TS.tar.gz" data/couchdb data/radicale data/matrix data/luanti data/excalidraw data/etherpad data/etherpad-db data/mumble data/classquiz data/classquiz-db data/classquiz-meili data/limesurvey data/limesurvey-db data/sftpgo-db "$WORLDS" 2>/dev/null || true
-docker compose start couchdb matrix luanti sftpgo-db etherpad-db classquiz-db limesurvey-db 2>/dev/null || true
-find backups -name 'homeserver-*.tar.gz' -mtime +14 -delete
-BKP_EOF
-    chmod +x "$CONFIG_ROOT/backup.sh"
-    if ! crontab -l 2>/dev/null | grep -q backup.sh; then
-        (crontab -l 2>/dev/null; echo "30 3 * * * $CONFIG_ROOT/backup.sh >> $BACKUP_DIR/backup.log 2>&1") | crontab -
-    fi
-    log "Бэкап: ежедневно 03:30 -> $BACKUP_DIR (14 дней хранения). Реплицируйте эту папку Syncthing на другое устройство."
-}
-
-show_status() {
-    if docker compose ls >/dev/null 2>&1; then docker compose ps; fi
-    echo "--- сайты nginx:"; ls -1 "$CONFIG_ROOT/config/nginx/conf.d" 2>/dev/null || true
-    echo "--- stream nginx:"; ls -1 "$CONFIG_ROOT/config/nginx/stream.d" 2>/dev/null || true
-}
-
-
 
 main() {
     [[ $EUID -eq 0 ]] || die "запустите от root: sudo bash $0"
@@ -938,39 +733,38 @@ main() {
             1) server_menu ;;
             2) prep_system ;;
             3) front_nginx_menu ;;
-            4) install_couchdb ;;
-            5) install_radicale ;;
-            6) install_sftpgo ;;
-            7) install_syncthing ;;
-            8) install_matrix ;;
-            9) install_luanti ;;
-            10) install_searxng ;;
-            11) install_excalidraw ;;
-            12) install_etherpad ;;
-            13) install_mumble ;;
-            14) install_classquiz ;;
-            15) install_limesurvey ;;
-            16) setup_backups ;;
-            17) show_status ;;
-            18) updates_menu ;;
-            19) lang_menu ;;
-            20) install_netdata ;;
-            21) install_gitea ;;
-            22) jitsi_menu ;;
+            4) install_netdata ;;
+            5) install_gitea ;;
+            6) jitsi_menu ;;
+            7) install_couchdb ;;
+            8) install_radicale ;;
+            9) install_sftpgo ;;
+            10) install_syncthing ;;
+            11) install_matrix ;;
+            12) install_luanti ;;
+            13) install_searxng ;;
+            14) install_excalidraw ;;
+            15) install_etherpad ;;
+            16) install_mumble ;;
+            17) install_classquiz ;;
+            18) install_limesurvey ;;
+            19) setup_backups ;;
+            20) show_status ;;
+            21) updates_menu ;;
+            22) lang_menu ;;
             0) exit 0 ;;
             *) warn "нет такого пункта" ;;
         esac
     done
 }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Загрузка модулей
 shopt -s nullglob
 mods=("$SCRIPT_DIR"/modules/*.sh)
 if [[ ${#mods[@]} -eq 0 ]]; then
-    die "модули не найдены: $SCRIPT_DIR/modules/*.sh — положите modules/ рядом с wundergarden.sh"
+    die "модули не найдены: $SCRIPT_DIR/modules/*.sh"
 fi
 for m in "${mods[@]}"; do source "$m"; done
 shopt -u nullglob
 
 main "$@"
-
