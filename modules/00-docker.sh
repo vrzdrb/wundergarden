@@ -602,7 +602,7 @@ prep_system() {
 
     if [[ -f "$ENV_FILE" ]]; then
         load_env
-        if ask_yn ".env уже существует (домен $DOMAIN). Пересоздать секреты и настройки?"; then
+        if ask_yn ".env уже существует. Пересоздать секреты и настройки?"; then
             warn "Секреты будут пересозданы — смените пароли в уже развёрнутых сервисах!"
             rm -f "$ENV_FILE"
         else
@@ -611,36 +611,21 @@ prep_system() {
     fi
 
     if [[ ! -f "$ENV_FILE" ]]; then
-        local domain email matrix_image luanti_image
         # Читаем часовой пояс из системы (настроен в подменю "Настройка сервера")
         local tz
         tz="$(timedatectl show --property=Timezone --value 2>/dev/null || echo "Europe/Moscow")"
         log "Часовой пояс из системы: $tz"
-        
-        domain="$(ask "Ваш домен (например: example.com)")"
-        [[ "$domain" =~ ^[a-zA-Z0-9.-]+$ ]] || die "похоже, это не домен: $domain"
-        email="$(ask "Email для Let's Encrypt" "admin@$domain")"
-        matrix_image="$(ask "Образ continuwuity" "ghcr.io/continuwuity/continuwuity:latest")"
-        luanti_image="$(ask "Образ Luanti" "linuxserver/minetest:latest")"
 
         mkdir -p "$CONFIG_ROOT"/{config/couchdb,data/{couchdb,radicale,syncthing,searxng,luanti/config},backups}
     cat > "$ENV_FILE" <<EOF
-DOMAIN=$domain
 TZ=$tz
-EMAIL=$email
 LANG_UI=ru
 HSTS_ENABLED=false
 STREAM_DOMAINS=
-SUB_OBSIDIAN=obsidian.$domain
-SUB_CAL=cal.$domain
-SUB_FILES=files.$domain
-SUB_SEARCH=search.$domain
-SUB_MATRIX=matrix.$domain
-SUB_TURN=turn.$domain
 TURN_PASSWORD=$(gen_pass)
 PUBLIC_IP=
-MATRIX_IMAGE=$matrix_image
-LUANTI_IMAGE=$luanti_image
+MATRIX_IMAGE=ghcr.io/continuwuity/continuwuity:latest
+LUANTI_IMAGE=linuxserver/minetest:latest
 LUANTI_WORLDS=$CONFIG_ROOT/data/luanti/worlds
 LUANTI_MODS=$CONFIG_ROOT/data/luanti/mods
 LUANTI_GAMES=$CONFIG_ROOT/data/luanti/games
@@ -664,16 +649,12 @@ SFTPGO_DB_PASSWORD=$(gen_pass)
 SFTPGO_DB_ROOT_PASSWORD=$(gen_pass)
 SFTPGO_ADMIN_USER=admin
 SFTPGO_SFTP_BIND=127.0.0.1:2022
-SUB_WEBDAV=webdav.$domain
 SFTPGO_DATA=/mnt/emmc/cloud
 SYNCTHING_GUI_AUTH=admin:$(gen_pass)
 SYNCTHING_GUI_BIND=127.0.0.1:8384
 SYNCTHING_SYNC_DIR=$CONFIG_ROOT/data/syncthing/sync
 SYNCTHING_RESCAN=3600
-SUB_SYNC=sync.$domain
-SUB_EXCALIDRAW=draw.$domain
 EXCALIDRAW_STORAGE=$CONFIG_ROOT/data/excalidraw
-SUB_ETHERPAD=pad.$domain
 ETHERPAD_DB_PASSWORD=$(gen_pass)
 ETHERPAD_DB_ROOT_PASSWORD=$(gen_pass)
 MUMBLE_SUPERUSER_PASSWORD=$(gen_pass)
@@ -681,13 +662,11 @@ MUMBLE_SERVER_PASSWORD=
 MUMBLE_WELCOMETEXT=Добро пожаловать на сервер
 MUMBLE_BANDWIDTH=72000
 MUMBLE_USERS=10
-SUB_CLASSQUIZ=quiz.$domain
 CLASSQUIZ_SECRET_KEY=$(gen_pass)
 CLASSQUIZ_DB_PASSWORD=$(gen_pass)
 CLASSQUIZ_SKIP_EMAIL=True
 CLASSQUIZ_MEILI_MEM=256m
 CLASSQUIZ_UPLOADS=$CONFIG_ROOT/data/classquiz
-SUB_LIMESURVEY=survey.$domain
 LIMESURVEY_DB_TYPE=mysql
 LIMESURVEY_DB_IMAGE=mariadb:11
 LIMESURVEY_DB_PORT=3306
@@ -698,6 +677,7 @@ SEARXNG_SECRET=$(gen_pass)
 SEARCH_PW=
 EOF
         chmod 600 "$ENV_FILE"
+        warn "Домен и поддомены будут настроены при установке nginx и сервисов."
     fi
 
     load_env
