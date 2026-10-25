@@ -600,24 +600,16 @@ prep_system() {
     command -v openssl >/dev/null || apt-get install -y -qq openssl
     install_docker
 
-    if [[ -f "$ENV_FILE" ]]; then
-        load_env
-        if ask_yn ".env уже существует. Пересоздать секреты и настройки?"; then
-            warn "Секреты будут пересозданы — смените пароли в уже развёрнутых сервисах!"
-            rm -f "$ENV_FILE"
-        else
-            log "Оставляю .env; docker-compose.yml регенерирую (актуальные сети и сервисы)."
-        fi
-    fi
+    # Читаем часовой пояс из системы (настроен в подменю "Настройка сервера")
+    local tz
+    tz="$(timedatectl show --property=Timezone --value 2>/dev/null || echo "Europe/Moscow")"
+    log "Часовой пояс из системы: $tz"
 
+    mkdir -p "$CONFIG_ROOT"/{config/couchdb,data/{couchdb,radicale,syncthing,searxng,luanti/config},backups}
+    
+    # Создаём .env автоматически, если его нет
     if [[ ! -f "$ENV_FILE" ]]; then
-        # Читаем часовой пояс из системы (настроен в подменю "Настройка сервера")
-        local tz
-        tz="$(timedatectl show --property=Timezone --value 2>/dev/null || echo "Europe/Moscow")"
-        log "Часовой пояс из системы: $tz"
-
-        mkdir -p "$CONFIG_ROOT"/{config/couchdb,data/{couchdb,radicale,syncthing,searxng,luanti/config},backups}
-    cat > "$ENV_FILE" <<EOF
+        cat > "$ENV_FILE" <<EOF
 TZ=$tz
 LANG_UI=ru
 HSTS_ENABLED=false
@@ -659,7 +651,7 @@ ETHERPAD_DB_PASSWORD=$(gen_pass)
 ETHERPAD_DB_ROOT_PASSWORD=$(gen_pass)
 MUMBLE_SUPERUSER_PASSWORD=$(gen_pass)
 MUMBLE_SERVER_PASSWORD=
-MUMBLE_WELCOMETEXT=Добро пожаловать на сервер
+MUMBLE_WELCOMETEXT=Welcome
 MUMBLE_BANDWIDTH=72000
 MUMBLE_USERS=10
 CLASSQUIZ_SECRET_KEY=$(gen_pass)
@@ -677,7 +669,9 @@ SEARXNG_SECRET=$(gen_pass)
 SEARCH_PW=
 EOF
         chmod 600 "$ENV_FILE"
-        warn "Домен и поддомены будут настроены при установке nginx и сервисов."
+        log "Конфигурация создана"
+    else
+        log "Конфигурация уже существует"
     fi
 
     load_env

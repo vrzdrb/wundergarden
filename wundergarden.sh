@@ -179,6 +179,19 @@ setup_timezone() {
     local current_tz
     current_tz=$(timedatectl show --property=Timezone --value 2>/dev/null || echo '?')
     echo "${c_txt}Текущий: $current_tz${c_off}"
+    echo ""
+    echo "${c_txt}Популярные часовые пояса:${c_off}"
+    echo "${c_txt}  Europe/Moscow       — Москва${c_off}"
+    echo "${c_txt}  Europe/Kyiv         — Киев${c_off}"
+    echo "${c_txt}  Europe/Minsk        — Минск${c_off}"
+    echo "${c_txt}  Asia/Yekaterinburg  — Екатеринбург${c_off}"
+    echo "${c_txt}  Asia/Novosibirsk    — Новосибирск${c_off}"
+    echo "${c_txt}  Asia/Vladivostok    — Владивосток${c_off}"
+    echo "${c_txt}  Asia/Almaty         — Алматы${c_off}"
+    echo "${c_txt}  Asia/Tashkent       — Ташкент${c_off}"
+    echo "${c_txt}  Europe/Berlin       — Берлин${c_off}"
+    echo "${c_txt}  UTC                 — Всемирное координированное время${c_off}"
+    echo ""
     local new_tz; new_tz=$(ask "Новый часовой пояс" "$current_tz")
     timedatectl set-timezone "$new_tz" && log "Установлено: $new_tz"
     read -rp "Enter — продолжить " _ || true
@@ -234,7 +247,7 @@ create_user() {
     if id "$username" >/dev/null 2>&1; then
         warn "пользователь $username уже существует"
     else
-        adduser --disabled-password --gecos "" "$username"
+        useradd -m -s /bin/bash "$username"
         echo "${c_txt}Установите пароль для $username:${c_off}"
         passwd "$username"
         usermod -aG sudo "$username"
@@ -271,7 +284,7 @@ ssh_settings_menu() {
                 [[ "$new_port" =~ ^[0-9]+$ && "$new_port" -ge 1 && "$new_port" -le 65535 ]] || { warn "некорректный порт"; continue; }
                 
                 ufw allow "$new_port/tcp" comment 'SSH' >/dev/null 2>&1 && log "UFW: порт $new_port/tcp открыт" || warn "Ошибка обновления UFW"
-                ufw reload >/dev/null 2>&1
+                ufw reload >/dev/null 2>&1 && log "UFW перезапущен" || warn "Ошибка перезапуска UFW"
                 
                 local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
                 mkdir -p /etc/ssh/sshd_config.d
@@ -336,7 +349,7 @@ change_ssh_port_direct() {
     [[ "$new_port" =~ ^[0-9]+$ && "$new_port" -ge 1 && "$new_port" -le 65535 ]] || { warn "некорректный порт"; return; }
     
     ufw allow "$new_port/tcp" comment 'SSH' >/dev/null 2>&1 && log "UFW: порт $new_port/tcp открыт" || warn "Ошибка UFW"
-    ufw reload >/dev/null 2>&1
+    ufw reload >/dev/null 2>&1 && log "UFW перезапущен" || warn "Ошибка перезапуска UFW"
     
     local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
     mkdir -p /etc/ssh/sshd_config.d
@@ -356,9 +369,13 @@ ufw_settings_menu() {
     while true; do
         local status=$(ufw status | head -1 | awk '{print $2}')
         local port=$(get_ssh_port)
+        local abuse_status="выкл"; [[ -f /opt/homeserver/abuse-block.sh ]] && abuse_status="вкл"
+        local rkn_status="выкл"; [[ -f /opt/homeserver/rkn-block.sh ]] && rkn_status="вкл"
         echo "${c_mag}=== Настройки UFW ===${c_off}"
         echo "${c_txt}Статус: $status${c_off}"
         echo "${c_txt}SSH-порт: $port${c_off}"
+        echo "${c_txt}Блокировка ботов: $abuse_status${c_off}"
+        echo "${c_txt}Блокировка РКН: $rkn_status${c_off}"
         echo ""
         echo "${c_txt}1. Изменить SSH-порт${c_off}"
         echo "${c_txt}2. Блокировка ботов${c_off}"
@@ -434,6 +451,8 @@ block_rkn() {
         echo "${c_mag}=== Блокировка РКН ===${c_off}"
         echo "${c_txt}Статус: активен${c_off}"
         if ask_yn "Отключить?"; then
+            iptables -D INPUT -m set --match-set rkn4 src -j DROP 2>/dev/null
+            ipset destroy rkn4 2>/dev/null
             rm -f "$script" "$cron"; log "Удалён"
         fi
         read -rp "Enter — продолжить " _ || true
@@ -443,14 +462,17 @@ block_rkn() {
     cat > "$script" <<'RKNEOF'
 #!/usr/bin/env bash
 set -e
-URL="https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv"
+URL="https://raw.githubusercontent.com/zapret-info/z-i/master/nxdump.csv"
 TMP="$(mktemp)"
-curl -fsSL --max-time 300 "$URL" -o "$TMP"
-ipset create rkn4_tmp hash:net
-cut -d';' -f1 "$TMP" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^/add rkn4_tmp /' | ipset restore
+if ! curl -fsSL --max-time 300 "$URL" -o "$TMP"; then
+    echo "Ошибка загрузки списка РКН"
+    exit 1
+fi
+ipset create rkn4_tmp hash:net 2>/dev/null || true
+grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?' "$TMP" | sort -u | sed 's/^/add rkn4_tmp /' | ipset restore 2>/dev/null || true
 ipset create rkn4 hash:net 2>/dev/null || true
-ipset swap rkn4_tmp rkn4
-ipset destroy rkn4_tmp
+ipset swap rkn4_tmp rkn4 2>/dev/null || true
+ipset destroy rkn4_tmp 2>/dev/null || true
 rm -f "$TMP"
 iptables -C INPUT -m set --match-set rkn4 src -j DROP 2>/dev/null || iptables -I INPUT 1 -m set --match-set rkn4 src -j DROP
 RKNEOF
@@ -554,7 +576,7 @@ fail2ban_menu() {
     while true; do
         [[ -f "$ENV_FILE" ]] && load_env
         local bantime="${F2B_BANTIME:-7200}" maxretry="${F2B_MAXRETRY:-10}" findtime="${F2B_FINDTIME:-900}"
-        local f2b_status=$(systemctl is-active fail2ban 2>/dev/null || echo "inactive")
+        local f2b_status=$(systemctl is-active fail2ban 2>/dev/null | tr -d '\n' || echo "inactive")
         
         echo "${c_mag}=== Fail2ban ===${c_off}"
         echo "${c_txt}Статус: $f2b_status${c_off}"
@@ -711,15 +733,22 @@ EOF
 
 shell_history_setup() {
     clear
-    echo "${c_mag}=== История shell ===${c_off}"
-    if [[ -f /etc/profile.d/99-homeserver-history.sh ]]; then
-        echo "${c_txt}Статус: НАСТРОЕНО${c_off}"
-        echo "${c_txt}HISTSIZE: $(grep HISTSIZE /etc/profile.d/99-homeserver-history.sh | cut -d= -f2)${c_off}"
-    else
-        echo "${c_txt}Статус: НЕ НАСТРОЕНО${c_off}"
-    fi
-    if ask_yn "Настроить?"; then
-        cat > /etc/profile.d/99-homeserver-history.sh <<'EOF'
+    while true; do
+        echo "${c_mag}=== История shell ===${c_off}"
+        if [[ -f /etc/profile.d/99-homeserver-history.sh ]]; then
+            echo "${c_txt}Статус: НАСТРОЕНО${c_off}"
+            echo "${c_txt}HISTSIZE: $(grep HISTSIZE /etc/profile.d/99-homeserver-history.sh | cut -d= -f2)${c_off}"
+        else
+            echo "${c_txt}Статус: НЕ НАСТРОЕНО${c_off}"
+        fi
+        echo ""
+        echo "${c_txt}1. Настроить${c_off}"
+        echo "${c_txt}2. Просмотреть историю в редакторе${c_off}"
+        echo "${c_txt}0. Назад${c_off}"
+        read -rp "Номер: " c || true
+        case "$c" in
+            1)
+                cat > /etc/profile.d/99-homeserver-history.sh <<'EOF'
 export HISTTIMEFORMAT="%F %T  "
 export HISTSIZE=100000
 export HISTFILESIZE=200000
@@ -727,9 +756,20 @@ export HISTCONTROL=ignoredups:erasedups
 shopt -s histappend
 PROMPT_COMMAND="history -a; history -c; history -r${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
 EOF
-        log "Настроено"
-    fi
-    read -rp "Enter — продолжить " _ || true
+                log "Настроено"
+                read -rp "Enter — продолжить " _ || true ;;
+            2)
+                require_cmd nano nano
+                if [[ -f ~/.bash_history ]]; then
+                    nano ~/.bash_history
+                else
+                    warn "История пока пуста"
+                    read -rp "Enter — продолжить " _ || true
+                fi ;;
+            0) return 0 ;;
+            *) warn "нет такого пункта" ;;
+        esac
+    done
 }
 
 setup_scheduled_reboot() {
@@ -802,7 +842,7 @@ server_menu() {
         local pass_policy="неактивна"; grep -q "pam_pwquality.so" /etc/pam.d/common-password 2>/dev/null && pass_policy="активна"
         local ssh_port=$(get_ssh_port)
         local ufw_status=$(ufw status 2>/dev/null | head -1 | awk '{print $2}' || echo '?')
-        local f2b_status=$(systemctl is-active fail2ban 2>/dev/null || echo "inactive")
+        local f2b_status=$(systemctl is-active fail2ban 2>/dev/null | tr -d '\n' || echo "inactive")
         local swap_status=$(swapon --show=SIZE --noheadings 2>/dev/null | head -1 || echo "нет")
         local sudo_log="выкл"; [[ -f /etc/sudoers.d/99-homeserver-logging ]] && sudo_log="вкл"
         local root_mail="не настроено"; command -v msmtp >/dev/null && grep -qs "account default" /etc/msmtprc 2>/dev/null && root_mail="настроено"
