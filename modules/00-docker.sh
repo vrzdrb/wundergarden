@@ -5,7 +5,7 @@ install_docker() {
         log "Docker уже установлен: $(docker --version)"
         return 0
     fi
-    log "Устанавливаю Docker по официальной инструкции (download.docker.com)..."
+    log "Устанавливаю Docker (download.docker.com)..."
     local os_id os_like
     os_id="$(. /etc/os-release && echo "$ID")"
     os_like="$(. /etc/os-release && echo "${ID_LIKE:-}")"

@@ -4,12 +4,13 @@
 Matrix (continuwuity + coturn), Luanti, SearXNG, Excalidraw, Etherpad, Mumble, ClassQuiz,
 LimeSurvey, Netdata, Gitea, Jitsi Meet.
 
-## Запуск
+## Запуск (root / sudo)
 
 ```bash
 curl -fsSL https://github.com/vrzdrb/wundergarden/archive/refs/heads/main.tar.gz | tar -xz
 cd wundergarden-main
-sudo bash wundergarden.sh
+chmod +x wundergarden.sh
+sudo ./wundergarden.sh
 ```
 
 ## Требования

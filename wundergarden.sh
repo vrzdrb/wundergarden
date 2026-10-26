@@ -51,6 +51,47 @@ BAN
 
 LANG_UI="${LANG_UI:-ru}"
 _t() {
+    if [[ "${LANG_UI:-ru}" == "en" ]]; then
+        case "$1" in
+            MHDR) echo "-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-" ;;
+            M01) echo "Server setup" ;;
+            M02) echo "Docker" ;;
+            M03) echo "nginx and certificates" ;;
+            M04) echo "Netdata" ;;
+            M05) echo "Gitea" ;;
+            M06) echo "Jitsi Meet" ;;
+            M07) echo "CouchDB" ;;
+            M08) echo "Radicale" ;;
+            M09) echo "SFTPGo" ;;
+            M10) echo "Syncthing" ;;
+            M11) echo "Matrix" ;;
+            M12) echo "Luanti" ;;
+            M13) echo "SearXNG" ;;
+            M14) echo "Excalidraw" ;;
+            M15) echo "Etherpad" ;;
+            M16) echo "Mumble" ;;
+            M17) echo "ClassQuiz" ;;
+            M18) echo "LimeSurvey" ;;
+            M19) echo "Language" ;;
+            MQ)   echo "  ${c_num}0.${c_off} ${c_txt}Exit${c_off}" ;;
+            MFTR) echo "-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-" ;;
+            SRV01) echo "Timezone" ;;
+            SRV02) echo "Password policy" ;;
+            SRV03) echo "Create user" ;;
+            SRV04) echo "SSH settings" ;;
+            SRV05) echo "UFW settings" ;;
+            SRV06) echo "Fail2ban" ;;
+            SRV07) echo "BBR, IPv6, DNS" ;;
+            SRV08) echo "Swap" ;;
+            SRV09) echo "Sudo logging" ;;
+            SRV10) echo "Root mail" ;;
+            SRV11) echo "Shell history" ;;
+            SRV12) echo "Unattended upgrades" ;;
+            SRV13) echo "Scheduled reboot" ;;
+            SRV14) echo "VPS diagnostics" ;;
+        esac
+        return
+    fi
     case "$1" in
         MHDR) echo "-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-" ;;
         M01) echo "Настройка сервера" ;;
@@ -71,10 +112,7 @@ _t() {
         M16) echo "Mumble" ;;
         M17) echo "ClassQuiz" ;;
         M18) echo "LimeSurvey" ;;
-        M19) echo "Бэкапы" ;;
-        M20) echo "Статус" ;;
-        M21) echo "Обновления" ;;
-        M22) echo "Язык" ;;
+        M19) echo "Язык" ;;
         MQ)   echo "  ${c_num}0.${c_off} ${c_txt}Выход${c_off}" ;;
         MFTR) echo "-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-" ;;
         SRV01) echo "Часовой пояс" ;;
@@ -88,7 +126,7 @@ _t() {
         SRV09) echo "Логирование sudo" ;;
         SRV10) echo "Почта root" ;;
         SRV11) echo "История shell" ;;
-        SRV12) echo "Автообновления" ;;
+        SRV12) echo "Unattended upgrades" ;;
         SRV13) echo "Перезагрузка по расписанию" ;;
         SRV14) echo "Диагностика VPS" ;;
     esac
@@ -121,10 +159,12 @@ trap 'die "сбой на строке $LINENO"' ERR
 print_menu() {
     clear
     banner
+    local docker_status="не установлен"
+    docker compose version >/dev/null 2>&1 && docker_status="установлен"
     cat <<MENU
 ${c_mag}$(_t MHDR)${c_off}
   ${c_num}1.${c_off} ${c_txt}$(_t M01)${c_off}
-  ${c_num}2.${c_off} ${c_txt}$(_t M02)${c_off}
+  ${c_num}2.${c_off} ${c_txt}$(_t M02): $docker_status${c_off}
   ${c_num}3.${c_off} ${c_txt}$(_t M03)${c_off}
   ${c_num}4.${c_off} ${c_txt}$(_t M04)${c_off}
   ${c_num}5.${c_off} ${c_txt}$(_t M05)${c_off}
@@ -142,9 +182,6 @@ ${c_mag}$(_t MHDR)${c_off}
  ${c_num}17.${c_off} ${c_txt}$(_t M17)${c_off}
  ${c_num}18.${c_off} ${c_txt}$(_t M18)${c_off}
  ${c_num}19.${c_off} ${c_txt}$(_t M19)${c_off}
- ${c_num}20.${c_off} ${c_txt}$(_t M20)${c_off}
- ${c_num}21.${c_off} ${c_txt}$(_t M21)${c_off}
- ${c_num}22.${c_off} ${c_txt}$(_t M22)${c_off}
 ${c_txt}$(_t MQ)${c_off}
 ${c_mag}$(_t MFTR)${c_off}
 MENU
@@ -200,7 +237,7 @@ setup_timezone() {
 configure_password_policy() {
     clear
     echo "${c_mag}=== Политика паролей ===${c_off}"
-    require_cmd pam_pwquality libpam-pwquality
+    require_cmd pam-auth-update libpam-pwquality
     
     local status="неактивна"
     if grep -q "pam_pwquality.so" /etc/pam.d/common-password 2>/dev/null; then
@@ -210,30 +247,29 @@ configure_password_policy() {
     echo ""
     echo "${c_txt}1. Включить политику${c_off}"
     echo "${c_txt}2. Отключить политику${c_off}"
-    echo "${c_txt}3. Применить к существующим пользователям${c_off}"
     echo "${c_txt}0. Назад${c_off}"
     read -rp "Номер: " c || true
     case "$c" in
         1)
             local pam_file="/etc/pam.d/common-password"
+            local pwquality_conf="/etc/security/pwquality.conf"
+            apt-get install -y libpam-pwquality
             sed -i '/pam_pwquality.so/d' "$pam_file"
-            echo 'password requisite pam_pwquality.so retry=3 minlen=12 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1' >> "$pam_file"
-            log "Политика включена"
+            echo 'password requisite pam_pwquality.so retry=3 minlen=12 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 enforce_for_root' >> "$pam_file"
+            cat > "$pwquality_conf" <<EOF
+minlen = 12
+ucredit = -1
+lcredit = -1
+dcredit = -1
+ocredit = -1
+EOF
+            pam-auth-update --force
+            log "Политика паролей настроена и активирована"
             read -rp "Enter — продолжить " _ || true ;;
         2)
             sed -i '/pam_pwquality.so/d' /etc/pam.d/common-password
+            pam-auth-update --force
             log "Политика отключена"
-            read -rp "Enter — продолжить " _ || true ;;
-        3)
-            echo "${c_txt}Смена паролей для пользователей (политика применится при следующем входе):${c_off}"
-            local users
-            users=$(awk -F: '$3 >= 1000 && $1 != "nobody" {print $1}' /etc/passwd)
-            for user in $users; do
-                echo "${c_txt}Пользователь: $user${c_off}"
-                if ask_yn "Сменить пароль?"; then
-                    passwd "$user"
-                fi
-            done
             read -rp "Enter — продолжить " _ || true ;;
         0) return 0 ;;
     esac
@@ -248,10 +284,13 @@ create_user() {
         warn "пользователь $username уже существует"
     else
         useradd -m -s /bin/bash "$username"
-        echo "${c_txt}Установите пароль для $username:${c_off}"
-        passwd "$username"
-        usermod -aG sudo "$username"
-        log "Пользователь $username создан"
+        echo "${c_txt}Задайте пароль для пользователя $username:${c_off}"
+        if passwd "$username"; then
+            usermod -aG sudo "$username"
+            log "Пользователь $username создан и добавлен в группу sudo"
+        else
+            warn "Ошибка установки пароля"
+        fi
     fi
     read -rp "Enter — продолжить " _ || true
 }
@@ -275,6 +314,8 @@ ssh_settings_menu() {
         echo ""
         echo "${c_txt}1. Изменить SSH-порт${c_off}"
         echo "${c_txt}2. Добавить SSH-ключ${c_off}"
+        echo "${c_txt}3. Вход по паролю: $pass_auth${c_off}"
+        echo "${c_txt}4. Вход root: $root_login${c_off}"
         echo "${c_txt}0. Назад${c_off}"
         read -rp "Номер: " c || true
         case "$c" in
@@ -283,7 +324,7 @@ ssh_settings_menu() {
                 local new_port; new_port=$(ask "Новый SSH-порт" "$port")
                 [[ "$new_port" =~ ^[0-9]+$ && "$new_port" -ge 1 && "$new_port" -le 65535 ]] || { warn "некорректный порт"; continue; }
                 
-                ufw allow "$new_port/tcp" comment 'SSH' >/dev/null 2>&1 && log "UFW: порт $new_port/tcp открыт" || warn "Ошибка обновления UFW"
+                ufw allow "$new_port/tcp" comment 'SSH' >/dev/null 2>&1 && log "UFW: порт $new_port/tcp открыт" || warn "Ошибка UFW"
                 ufw reload >/dev/null 2>&1 && log "UFW перезапущен" || warn "Ошибка перезапуска UFW"
                 
                 local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
@@ -333,6 +374,35 @@ ssh_settings_menu() {
                     warn "Ошибка перезапуска SSH"
                 fi
                 read -rp "Enter — продолжить " _ || true ;;
+            3)
+                local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
+                mkdir -p /etc/ssh/sshd_config.d
+                if [[ "$pass_auth" == "yes" ]]; then
+                    grep -q "^PasswordAuthentication" "$cfg" 2>/dev/null && sed -i 's|^PasswordAuthentication.*|PasswordAuthentication no|' "$cfg" || echo "PasswordAuthentication no" >> "$cfg"
+                    systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null
+                    log "Вход по паролю отключён"
+                else
+                    grep -q "^PasswordAuthentication" "$cfg" 2>/dev/null && sed -i 's|^PasswordAuthentication.*|PasswordAuthentication yes|' "$cfg" || echo "PasswordAuthentication yes" >> "$cfg"
+                    systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null
+                    log "Вход по паролю включён"
+                fi
+                read -rp "Enter — продолжить " _ || true ;;
+            4)
+                local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
+                mkdir -p /etc/ssh/sshd_config.d
+                echo "${c_txt}1. yes — разрешён${c_off}"
+                echo "${c_txt}2. no — запрещён${c_off}"
+                echo "${c_txt}3. prohibit-password — только по ключу${c_off}"
+                local choice; choice=$(ask "Выберите" "3")
+                case "$choice" in
+                    1) new_val="yes" ;;
+                    2) new_val="no" ;;
+                    *) new_val="prohibit-password" ;;
+                esac
+                grep -q "^PermitRootLogin" "$cfg" 2>/dev/null && sed -i "s|^PermitRootLogin.*|PermitRootLogin $new_val|" "$cfg" || echo "PermitRootLogin $new_val" >> "$cfg"
+                systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null
+                log "PermitRootLogin установлен в $new_val"
+                read -rp "Enter — продолжить " _ || true ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
         esac
@@ -377,15 +447,23 @@ ufw_settings_menu() {
         echo "${c_txt}Блокировка ботов: $abuse_status${c_off}"
         echo "${c_txt}Блокировка РКН: $rkn_status${c_off}"
         echo ""
-        echo "${c_txt}1. Изменить SSH-порт${c_off}"
-        echo "${c_txt}2. Блокировка ботов${c_off}"
-        echo "${c_txt}3. Блокировка РКН${c_off}"
+        echo "${c_txt}1. Включить/отключить UFW${c_off}"
+        echo "${c_txt}2. Изменить SSH-порт${c_off}"
+        echo "${c_txt}3. Блокировка ботов${c_off}"
+        echo "${c_txt}4. Блокировка РКН${c_off}"
         echo "${c_txt}0. Назад${c_off}"
         read -rp "Номер: " c || true
         case "$c" in
-            1) change_ssh_port_direct ;;
-            2) abuse_block_setup ;;
-            3) block_rkn ;;
+            1)
+                if ufw status | grep -q "Status: active"; then
+                    ufw disable && log "UFW отключён"
+                else
+                    ufw --force enable && log "UFW включён"
+                fi
+                read -rp "Enter — продолжить " _ || true ;;
+            2) change_ssh_port_direct ;;
+            3) abuse_block_setup ;;
+            4) block_rkn ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
         esac
@@ -623,6 +701,10 @@ setup_network_bbr_ipv6_dns() {
         echo "${c_txt}BBR: $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '?')${c_off}"
         echo "${c_txt}IPv6: $([ -f /etc/sysctl.d/99-homeserver-ipv6.conf ] && echo 'отключён' || echo 'включён')${c_off}"
         echo "${c_txt}DNS-over-TLS: $([ -f /etc/systemd/resolved.conf.d/99-homeserver.conf ] && echo 'включён' || echo 'выкл')${c_off}"
+        if [[ -f /etc/resolv.conf ]]; then
+            echo "${c_txt}Текущие nameservers:${c_off}"
+            grep "^nameserver" /etc/resolv.conf | sed 's/^/  /'
+        fi
         echo ""
         echo "${c_txt}1. BBR${c_off}"
         echo "${c_txt}2. IPv6${c_off}"
@@ -673,7 +755,7 @@ EOF
 
 unattended_upgrades_setup() {
     clear
-    echo "${c_mag}=== Автообновления ===${c_off}"
+    echo "${c_mag}=== Unattended upgrades ===${c_off}"
     if dpkg -l unattended-upgrades 2>/dev/null | grep -q '^ii'; then
         echo "${c_txt}Статус: УСТАНОВЛЕНО${c_off}"
         if ask_yn "Отключить?"; then
@@ -742,13 +824,17 @@ shell_history_setup() {
             echo "${c_txt}Статус: НЕ НАСТРОЕНО${c_off}"
         fi
         echo ""
-        echo "${c_txt}1. Настроить${c_off}"
+        echo "${c_txt}1. Включить/отключить${c_off}"
         echo "${c_txt}2. Просмотреть историю в редакторе${c_off}"
         echo "${c_txt}0. Назад${c_off}"
         read -rp "Номер: " c || true
         case "$c" in
             1)
-                cat > /etc/profile.d/99-homeserver-history.sh <<'EOF'
+                if [[ -f /etc/profile.d/99-homeserver-history.sh ]]; then
+                    rm -f /etc/profile.d/99-homeserver-history.sh
+                    log "Отключено"
+                else
+                    cat > /etc/profile.d/99-homeserver-history.sh <<'EOF'
 export HISTTIMEFORMAT="%F %T  "
 export HISTSIZE=100000
 export HISTFILESIZE=200000
@@ -756,7 +842,8 @@ export HISTCONTROL=ignoredups:erasedups
 shopt -s histappend
 PROMPT_COMMAND="history -a; history -c; history -r${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
 EOF
-                log "Настроено"
+                    log "Включено"
+                fi
                 read -rp "Enter — продолжить " _ || true ;;
             2)
                 require_cmd nano nano
@@ -780,37 +867,84 @@ setup_scheduled_reboot() {
     if [[ -f "$cron" ]]; then
         local schedule=$(cat "$cron" | grep -v '^#' | grep -v '^$')
         echo "${c_txt}Текущее: $schedule${c_off}"
+        echo ""
+        echo "${c_txt}1. Выключить${c_off}"
+        echo "${c_txt}2. Изменить${c_off}"
+        echo "${c_txt}0. Назад${c_off}"
     else
         echo "${c_txt}Текущее: не настроено${c_off}"
+        echo ""
+        echo "${c_txt}1. Включить${c_off}"
+        echo "${c_txt}0. Назад${c_off}"
     fi
-    echo ""
-    echo "${c_txt}1. Выключить${c_off}"
-    echo "${c_txt}2. Настроить${c_off}"
-    echo "${c_txt}0. Назад${c_off}"
     read -rp "Номер: " c || true
     case "$c" in
-        1) rm -f "$cron"; log "Выключено"; read -rp "Enter — продолжить " _ || true ;;
+        1)
+            if [[ -f "$cron" ]]; then
+                rm -f "$cron"; log "Выключено"
+            else
+                local interval hour minute dow dom
+                echo "${c_txt}Интервал:${c_off}"
+                echo "${c_txt}  1. Ежедневно${c_off}"
+                echo "${c_txt}  2. Еженедельно${c_off}"
+                echo "${c_txt}  3. Ежемесячно${c_off}"
+                interval=$(ask "1-3" "2")
+                hour=$(ask "Час" "5")
+                minute=$(ask "Минуты" "0")
+                case "$interval" in
+                    1) printf "$minute $hour * * * root /sbin/reboot\n" > "$cron"; log "Ежедневно в $hour:$minute" ;;
+                    2)
+                        echo "${c_txt}День недели:${c_off}"
+                        echo "${c_txt}  1 — Понедельник${c_off}"
+                        echo "${c_txt}  2 — Вторник${c_off}"
+                        echo "${c_txt}  3 — Среда${c_off}"
+                        echo "${c_txt}  4 — Четверг${c_off}"
+                        echo "${c_txt}  5 — Пятница${c_off}"
+                        echo "${c_txt}  6 — Суббота${c_off}"
+                        echo "${c_txt}  7 — Воскресенье${c_off}"
+                        dow=$(ask "День" "1")
+                        printf "$minute $hour * * $dow root /sbin/reboot\n" > "$cron"
+                        local day_names=("" "Понедельник" "Вторник" "Среда" "Четверг" "Пятница" "Суббота" "Воскресенье")
+                        log "Еженедельно, ${day_names[$dow]} в $hour:$minute" ;;
+                    3)
+                        dom=$(ask "День месяца" "1")
+                        printf "$minute $hour $dom * * root /sbin/reboot\n" > "$cron"
+                        log "Ежемесячно, $dom-го в $hour:$minute" ;;
+                esac
+            fi
+            read -rp "Enter — продолжить " _ || true ;;
         2)
-            local interval hour minute dow dom
-            echo "${c_txt}Интервал:${c_off}"
-            echo "${c_txt}  1. Ежедневно${c_off}"
-            echo "${c_txt}  2. Еженедельно${c_off}"
-            echo "${c_txt}  3. Ежемесячно${c_off}"
-            interval=$(ask "1-3" "2")
-            hour=$(ask "Час" "5")
-            minute=$(ask "Минуты" "0")
-            case "$interval" in
-                1) printf "$minute $hour * * * root /sbin/reboot\n" > "$cron"; log "Ежедневно в $hour:$minute" ;;
-                2)
-                    echo "${c_txt}День недели (1=пн, 7=вс):${c_off}"
-                    dow=$(ask "День" "1")
-                    printf "$minute $hour * * $dow root /sbin/reboot\n" > "$cron"
-                    log "Еженедельно, день $dow в $hour:$minute" ;;
-                3)
-                    dom=$(ask "День месяца" "1")
-                    printf "$minute $hour $dom * * root /sbin/reboot\n" > "$cron"
-                    log "Ежемесячно, $dom-го в $hour:$minute" ;;
-            esac
+            if [[ -f "$cron" ]]; then
+                rm -f "$cron"
+                local interval hour minute dow dom
+                echo "${c_txt}Интервал:${c_off}"
+                echo "${c_txt}  1. Ежедневно${c_off}"
+                echo "${c_txt}  2. Еженедельно${c_off}"
+                echo "${c_txt}  3. Ежемесячно${c_off}"
+                interval=$(ask "1-3" "2")
+                hour=$(ask "Час" "5")
+                minute=$(ask "Минуты" "0")
+                case "$interval" in
+                    1) printf "$minute $hour * * * root /sbin/reboot\n" > "$cron"; log "Ежедневно в $hour:$minute" ;;
+                    2)
+                        echo "${c_txt}День недели:${c_off}"
+                        echo "${c_txt}  1 — Понедельник${c_off}"
+                        echo "${c_txt}  2 — Вторник${c_off}"
+                        echo "${c_txt}  3 — Среда${c_off}"
+                        echo "${c_txt}  4 — Четверг${c_off}"
+                        echo "${c_txt}  5 — Пятница${c_off}"
+                        echo "${c_txt}  6 — Суббота${c_off}"
+                        echo "${c_txt}  7 — Воскресенье${c_off}"
+                        dow=$(ask "День" "1")
+                        printf "$minute $hour * * $dow root /sbin/reboot\n" > "$cron"
+                        local day_names=("" "Понедельник" "Вторник" "Среда" "Четверг" "Пятница" "Суббота" "Воскресенье")
+                        log "Еженедельно, ${day_names[$dow]} в $hour:$minute" ;;
+                    3)
+                        dom=$(ask "День месяца" "1")
+                        printf "$minute $hour $dom * * root /sbin/reboot\n" > "$cron"
+                        log "Ежемесячно, $dom-го в $hour:$minute" ;;
+                esac
+            fi
             read -rp "Enter — продолжить " _ || true ;;
         0) return 0 ;;
         *) warn "нет такого пункта" ;;
@@ -826,12 +960,55 @@ diag_menu() {
     echo "${c_txt}0) Назад${c_off}"
     local n; n=$(ask "1-3" "")
     case "$n" in
-        1) bash <(curl -fsSL https://raw.githubusercontent.com/hidden-refuge/vps-audit/main/vps-audit.sh) ;;
-        2) bash <(curl -fsSL https://raw.githubusercontent.com/uxh/sh/main/ipregion.sh) ;;
+        1) curl -O https://raw.githubusercontent.com/vernu/vps-audit/main/vps-audit.sh && chmod +x vps-audit.sh && ./vps-audit.sh ;;
+        2) wget -O ipregion.sh https://ipregion.vrnt.xyz && chmod +x ipregion.sh && ./ipregion.sh ;;
         3) bash <(curl -fsSL https://raw.githubusercontent.com/LemonBench/LemonBench/main/LemonBench.sh) fast ;;
         0) return 0 ;;
     esac
     read -rp "Enter — продолжить " _ || true
+}
+
+docker_menu() {
+    clear
+    while true; do
+        local docker_status="не установлен"
+        docker compose version >/dev/null 2>&1 && docker_status="установлен"
+        
+        echo "${c_mag}=== Docker ===${c_off}"
+        echo "${c_txt}Статус: $docker_status${c_off}"
+        if docker compose version >/dev/null 2>&1; then
+            echo ""
+            echo "${c_txt}Запущенные контейнеры:${c_off}"
+            docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "${c_txt}(нет запущенных)${c_off}"
+        fi
+        echo ""
+        echo "${c_txt}1. Установка${c_off}"
+        echo "${c_txt}2. Перезапуск контейнера${c_off}"
+        echo "${c_txt}3. Пересоздание контейнера${c_off}"
+        echo "${c_txt}4. Логи Docker${c_off}"
+        echo "${c_txt}0. Назад${c_off}"
+        read -rp "Номер: " c || true
+        case "$c" in
+            1) prep_system; read -rp "Enter — продолжить " _ || true ;;
+            2)
+                if ! docker compose version >/dev/null 2>&1; then warn "Docker не установлен"; continue; fi
+                local container; container=$(ask "Имя контейнера" "")
+                [[ -z "$container" ]] && continue
+                docker restart "$container" && log "Контейнер $container перезапущен"
+                read -rp "Enter — продолжить " _ || true ;;
+            3)
+                if ! docker compose version >/dev/null 2>&1; then warn "Docker не установлен"; continue; fi
+                local container; container=$(ask "Имя контейнера" "")
+                [[ -z "$container" ]] && continue
+                docker compose up -d --force-recreate "$container" && log "Контейнер $container пересоздан"
+                read -rp "Enter — продолжить " _ || true ;;
+            4)
+                journalctl -u docker --no-pager -n 50
+                read -rp "Enter — продолжить " _ || true ;;
+            0) return 0 ;;
+            *) warn "нет такого пункта" ;;
+        esac
+    done
 }
 
 server_menu() {
@@ -898,7 +1075,7 @@ main() {
         read -rp "Выбор: " choice || true
         case "$choice" in
             1) server_menu ;;
-            2) prep_system ;;
+            2) docker_menu ;;
             3) front_nginx_menu ;;
             4) install_netdata ;;
             5) install_gitea ;;
@@ -915,10 +1092,7 @@ main() {
             16) install_mumble ;;
             17) install_classquiz ;;
             18) install_limesurvey ;;
-            19) setup_backups ;;
-            20) show_status ;;
-            21) updates_menu ;;
-            22) lang_menu ;;
+            19) lang_menu ;;
             0) exit 0 ;;
             *) warn "нет такого пункта" ;;
         esac
