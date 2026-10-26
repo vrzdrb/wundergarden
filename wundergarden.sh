@@ -267,7 +267,33 @@ configure_password_policy() {
     read -rp "Номер: " c || true
     case "$c" in
         1)
-            pam-auth-update
+            # Устанавливаем libpam-pwquality
+            apt-get install -y libpam-pwquality
+            
+            # Настраиваем /etc/pam.d/common-password
+            local pam_file="/etc/pam.d/common-password"
+            sed -i '/pam_pwquality.so/d' "$pam_file"
+            echo 'password requisite pam_pwquality.so retry=3 minlen=12 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 enforce_for_root' >> "$pam_file"
+            
+            # Настраиваем /etc/security/pwquality.conf
+            cat > /etc/security/pwquality.conf <<EOF
+# Минимальная длина пароля
+minlen = 12
+# Требовать хотя бы одну заглавную букву
+ucredit = -1
+# Требовать хотя бы одну строчную букву
+lcredit = -1
+# Требовать хотя бы одну цифру
+dcredit = -1
+# Требовать хотя бы один специальный символ
+ocredit = -1
+EOF
+            
+            # Применяем изменения
+            pam-auth-update --force
+            
+            log "Политика паролей настроена и активирована"
+            log "Требования: мин. 12 символов, заглавная, строчная, цифра, спецсимвол"
             read -rp "Enter — продолжить " _ || true ;;
         0) return 0 ;;
     esac
@@ -329,6 +355,11 @@ ssh_settings_menu() {
                 mkdir -p /etc/ssh/sshd_config.d
                 grep -q "^Port " "$cfg" 2>/dev/null && sed -i "s|^Port .*|Port $new_port|" "$cfg" || echo "Port $new_port" >> "$cfg"
                 
+                # Убедимся, что Include директива есть в основном sshd_config
+                if ! grep -q "^Include /etc/ssh/sshd_config.d" /etc/ssh/sshd_config 2>/dev/null; then
+                    echo "Include /etc/ssh/sshd_config.d/*.conf" >> /etc/ssh/sshd_config
+                fi
+                
                 if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
                     log "SSH перезапущен, порт: $new_port"
                 else
@@ -340,18 +371,19 @@ ssh_settings_menu() {
                 [[ -z "$username" ]] && continue
                 id "$username" >/dev/null 2>&1 || { warn "пользователь не найден"; continue; }
                 local IP; IP="$(curl -fsS --max-time 5 ifconfig.me 2>/dev/null || echo '<IP>')"
+                local port=$(get_ssh_port)
                 echo "${c_mag}=======================================================================================${c_off}"
                 echo "${c_mag}Создайте ключ на своём компьютере:${c_off}"
                 echo "${c_txt}ssh-keygen -t ed25519${c_off}"
                 echo ""
                 echo "${c_mag}Загрузите ключ на сервер (Linux):${c_off}"
-                echo "${c_txt}ssh-copy-id -i ~/.ssh/имяключа.pub $username@$IP${c_off}"
+                echo "${c_txt}ssh-copy-id -i ~/.ssh/имяключа.pub -p $port $username@$IP${c_off}"
                 echo ""
                 echo "${c_mag}Команда для Windows:${c_off}"
-                echo "${c_txt}type %USERPROFILE%\\.ssh\\имяключа.pub | ssh $username@$IP \"cat >> ~/.ssh/authorized_keys\"${c_off}"
+                echo "${c_txt}type %USERPROFILE%\\.ssh\\имяключа.pub | ssh -p $port $username@$IP \"cat >> ~/.ssh/authorized_keys\"${c_off}"
                 echo ""
                 echo "${c_mag}Проверьте вход ключом:${c_off}"
-                echo "${c_txt}ssh -i ~/.ssh/имяключа $username@$IP${c_off}"
+                echo "${c_txt}ssh -i ~/.ssh/имяключа -p $port $username@$IP${c_off}"
                 echo ""
                 echo "${c_mag}ТОЛЬКО ЕСЛИ ВХОД УСПЕШЕН, нажмите Enter для отключения пароля${c_off}"
                 echo "${c_mag}=======================================================================================${c_off}"
@@ -360,6 +392,11 @@ ssh_settings_menu() {
                 local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
                 mkdir -p /etc/ssh/sshd_config.d
                 grep -q "^PasswordAuthentication" "$cfg" 2>/dev/null && sed -i 's|^PasswordAuthentication.*|PasswordAuthentication no|' "$cfg" || echo "PasswordAuthentication no" >> "$cfg"
+                
+                # Убедимся, что Include директива есть в основном sshd_config
+                if ! grep -q "^Include /etc/ssh/sshd_config.d" /etc/ssh/sshd_config 2>/dev/null; then
+                    echo "Include /etc/ssh/sshd_config.d/*.conf" >> /etc/ssh/sshd_config
+                fi
                 
                 if [[ -f /etc/ssh/sshd_config.d/50-cloud-init.conf ]]; then
                     mv /etc/ssh/sshd_config.d/50-cloud-init.conf "/etc/ssh/sshd_config.d/50-cloud-init.conf.disabled.$(date +%s)"
@@ -375,6 +412,10 @@ ssh_settings_menu() {
             3)
                 local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
                 mkdir -p /etc/ssh/sshd_config.d
+                # Убедимся, что Include директива есть в основном sshd_config
+                if ! grep -q "^Include /etc/ssh/sshd_config.d" /etc/ssh/sshd_config 2>/dev/null; then
+                    echo "Include /etc/ssh/sshd_config.d/*.conf" >> /etc/ssh/sshd_config
+                fi
                 if [[ "$pass_auth" == "yes" ]]; then
                     grep -q "^PasswordAuthentication" "$cfg" 2>/dev/null && sed -i 's|^PasswordAuthentication.*|PasswordAuthentication no|' "$cfg" || echo "PasswordAuthentication no" >> "$cfg"
                     if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
@@ -394,6 +435,10 @@ ssh_settings_menu() {
             4)
                 local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
                 mkdir -p /etc/ssh/sshd_config.d
+                # Убедимся, что Include директива есть в основном sshd_config
+                if ! grep -q "^Include /etc/ssh/sshd_config.d" /etc/ssh/sshd_config 2>/dev/null; then
+                    echo "Include /etc/ssh/sshd_config.d/*.conf" >> /etc/ssh/sshd_config
+                fi
                 echo "${c_txt}1. yes — разрешён${c_off}"
                 echo "${c_txt}2. no — запрещён${c_off}"
                 echo "${c_txt}3. prohibit-password — только по ключу${c_off}"
@@ -447,7 +492,7 @@ ufw_settings_menu() {
         local status=$(ufw status | head -1 | awk '{print $2}')
         local port=$(get_ssh_port)
         local abuse_status="выкл"; [[ -f /opt/homeserver/abuse-block.sh ]] && abuse_status="вкл"
-        local rkn_status="выкл"; [[ -f /opt/homeserver/rkn-block.sh ]] && rkn_status="вкл"
+        local rkn_status="выкл"; [[ -f "$CONFIG_ROOT/rkn-block.sh" ]] && rkn_status="вкл"
         echo "${c_mag}=== Настройки UFW ===${c_off}"
         echo "${c_txt}Статус: $status${c_off}"
         echo "${c_txt}SSH-порт: $port${c_off}"
@@ -531,47 +576,58 @@ ABEOF
 block_rkn() {
     clear
     require_cmd ipset ipset
-    local script=/opt/homeserver/rkn-block.sh cron=/etc/cron.d/homeserver-rkn
-    if [[ -f "$script" ]]; then
-        echo "${c_mag}=== Блокировка РКН ===${c_off}"
-        echo "${c_txt}Статус: активен${c_off}"
-        if ask_yn "Отключить?"; then
-            iptables -D INPUT -m set --match-set rkn4 src -j DROP 2>/dev/null
-            ipset destroy rkn4 2>/dev/null
-            rm -f "$script" "$cron"; log "Удалён"
-        fi
-        read -rp "Enter — продолжить " _ || true
-        return
-    fi
-    echo "${c_mag}=== Блокировка РКН ===${c_off}"
-    cat > "$script" <<'RKNEOF'
+    require_cmd wget wget
+    echo "${c_mag}=== Блокировка IP-адресов РКН ===${c_off}"
+    echo "${c_txt}Источник: github.com/C24Be/AS_Network_List${c_off}"
+    
+    local script="$CONFIG_ROOT/rkn-block.sh"
+    cat > "$script" <<'EOF'
 #!/usr/bin/env bash
 set -e
-URL="https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv.gz"
-TMP="$(mktemp)"
-TMPGZ="$(mktemp)"
-if ! curl -fsSL --max-time 300 "$URL" -o "$TMPGZ"; then
-    echo "Ошибка загрузки списка РКН"
+cd /opt/homeserver
+wget -O blacklist.txt https://raw.githubusercontent.com/C24Be/AS_Network_List/main/blacklists/blacklist.txt
+if [[ ! -f blacklist.txt ]]; then
+    echo "Файл blacklist.txt не найден!"
     exit 1
 fi
-gunzip -c "$TMPGZ" > "$TMP"
-rm -f "$TMPGZ"
+echo "Создание ipset списка..."
 ipset create rkn4_tmp hash:net 2>/dev/null || true
-grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?' "$TMP" | sort -u | sed 's/^/add rkn4_tmp /' | ipset restore 2>/dev/null || true
+count=0
+while read -r subnet; do
+    [[ -z "$subnet" || "$subnet" =~ ^# ]] && continue
+    ipset add rkn4_tmp "$subnet" 2>/dev/null || true
+    ((count++))
+done < blacklist.txt
+echo "Загружено подсетей: $count"
+echo "Активация списка..."
 ipset create rkn4 hash:net 2>/dev/null || true
 ipset swap rkn4_tmp rkn4 2>/dev/null || true
 ipset destroy rkn4_tmp 2>/dev/null || true
-rm -f "$TMP"
+echo "Применение правил iptables..."
 iptables -C INPUT -m set --match-set rkn4 src -j DROP 2>/dev/null || iptables -I INPUT 1 -m set --match-set rkn4 src -j DROP
-RKNEOF
+echo "Готово!"
+EOF
     chmod +x "$script"
+    
+    echo "${c_txt}Запускаем rkn-block.sh...${c_off}"
     if "$script"; then
-        printf '@reboot root /opt/homeserver/rkn-block.sh\n23 3 * * * root /opt/homeserver/rkn-block.sh\n' > "$cron"
-        log "Применён"
+        log "Блокировка РКН применена (ipset)"
     else
+        warn "Ошибка применения блокировки"
         rm -f "$script"
-        warn "Ошибка применения"
+        read -rp "Enter — продолжить " _ || true
+        return
     fi
+    
+    # Добавляем в crontab для ежедневного обновления
+    if ! crontab -l 2>/dev/null | grep -q "rkn-block.sh"; then
+        (crontab -l 2>/dev/null; echo "0 3 * * * $script") | crontab -
+        log "Задание добавлено в crontab для ежедневного выполнения в 3:00"
+    else
+        warn "Задание уже существует в crontab"
+    fi
+    
+    log "Блокировка РКН через ipset завершена!"
     read -rp "Enter — продолжить " _ || true
 }
 
@@ -624,9 +680,10 @@ sudo_logging_menu() {
                 tail -n 5 /var/log/sudo.log
             else
                 echo "${c_txt}Лог пока пуст${c_off}"
+                echo "${c_txt}Файл лога будет создан: /var/log/sudo.log${c_off}"
                 if ask_yn "Сделать тестовую запись?"; then
-                    sudo -u root echo "Тестовая запись" >/dev/null 2>&1
-                    log "Тестовая запись сделана"
+                    sudo echo "Тестовая запись sudo - $(date)" >> /var/log/sudo.log
+                    log "Тестовая запись сделана в /var/log/sudo.log"
                 fi
             fi
         else
@@ -643,7 +700,10 @@ sudo_logging_menu() {
                 if ! grep -q "^Defaults.*logfile=/var/log/sudo.log" /etc/sudoers 2>/dev/null; then
                     echo 'Defaults logfile="/var/log/sudo.log"' >> /etc/sudoers
                     if visudo -cf /etc/sudoers >/dev/null; then
+                        touch /var/log/sudo.log
+                        chmod 600 /var/log/sudo.log
                         log "Логирование sudo включено"
+                        log "Файл лога: /var/log/sudo.log"
                     else
                         warn "Ошибка в конфигурации sudoers, откат изменений"
                         sed -i '/^Defaults.*logfile=\/var\/log\/sudo.log$/d' /etc/sudoers
@@ -666,7 +726,24 @@ sudo_logging_menu() {
                 read -rp "Enter — продолжить " _ || true ;;
             3)
                 require_cmd nano nano
-                [[ -f /var/log/sudo.log ]] && nano /var/log/sudo.log || { warn "лог не найден"; read -rp "Enter — продолжить " _ || true; } ;;
+                if [[ -f /var/log/sudo.log ]]; then
+                    nano /var/log/sudo.log
+                else
+                    echo "${c_txt}Файл лога не найден: /var/log/sudo.log${c_off}"
+                    echo "${c_txt}Логирование sudo не включено или записей ещё не было${c_off}"
+                    if ask_yn "Включить логирование sudo?"; then
+                        echo 'Defaults logfile="/var/log/sudo.log"' >> /etc/sudoers
+                        if visudo -cf /etc/sudoers >/dev/null; then
+                            touch /var/log/sudo.log
+                            chmod 600 /var/log/sudo.log
+                            log "Логирование sudo включено"
+                            log "Файл лога: /var/log/sudo.log"
+                        else
+                            warn "Ошибка в конфигурации sudoers"
+                        fi
+                    fi
+                    read -rp "Enter — продолжить " _ || true
+                fi ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
         esac
@@ -679,7 +756,7 @@ fail2ban_menu() {
         clear
         [[ -f "$ENV_FILE" ]] && load_env
         local bantime="${F2B_BANTIME:-7200}" maxretry="${F2B_MAXRETRY:-10}" findtime="${F2B_FINDTIME:-900}"
-        local f2b_status=$(systemctl is-active fail2ban 2>/dev/null | head -1 | tr -d '[:space:]' || echo "inactive")
+        local f2b_status=$(systemctl is-active fail2ban 2>/dev/null | head -1 | tr -d '\n\r' || echo "inactive")
         
         echo "${c_mag}=== Fail2ban ===${c_off}"
         echo "${c_txt}Статус: $f2b_status${c_off}"
@@ -930,7 +1007,7 @@ setup_scheduled_reboot() {
     echo "${c_mag}=== Перезагрузка по расписанию ===${c_off}"
     local cron=/etc/cron.d/homeserver-reboot
     if [[ -f "$cron" ]]; then
-        local schedule=$(cat "$cron" | grep -v '^#' | grep -v '^$')
+        local schedule=$(cat "$cron" | grep -v '^#' | grep -v '^$' | head -1)
         echo "${c_txt}Текущее: $schedule${c_off}"
         
         # Парсим cron для человекопонятного описания
@@ -971,7 +1048,7 @@ setup_scheduled_reboot() {
                 hour=$(ask "Час" "5")
                 minute=$(ask "Минуты" "0")
                 case "$interval" in
-                    1) printf "$minute $hour * * * root /sbin/reboot\n" > "$cron"; log "Ежедневно в $hour:$minute" ;;
+                    1) echo "$minute $hour * * * root /sbin/reboot" > "$cron"; log "Ежедневно в $hour:$minute" ;;
                     2)
                         echo "${c_txt}День недели:${c_off}"
                         echo "${c_txt}  1 — Понедельник${c_off}"
@@ -982,12 +1059,12 @@ setup_scheduled_reboot() {
                         echo "${c_txt}  6 — Суббота${c_off}"
                         echo "${c_txt}  7 — Воскресенье${c_off}"
                         dow=$(ask "День" "1")
-                        printf "$minute $hour * * $dow root /sbin/reboot\n" > "$cron"
+                        echo "$minute $hour * * $dow root /sbin/reboot" > "$cron"
                         local day_names=("" "Понедельник" "Вторник" "Среда" "Четверг" "Пятница" "Суббота" "Воскресенье")
                         log "Еженедельно, ${day_names[$dow]} в $hour:$minute" ;;
                     3)
                         dom=$(ask "День месяца" "1")
-                        printf "$minute $hour $dom * * root /sbin/reboot\n" > "$cron"
+                        echo "$minute $hour $dom * * root /sbin/reboot" > "$cron"
                         log "Ежемесячно, $dom-го в $hour:$minute" ;;
                 esac
             fi
@@ -1004,7 +1081,7 @@ setup_scheduled_reboot() {
                 hour=$(ask "Час" "5")
                 minute=$(ask "Минуты" "0")
                 case "$interval" in
-                    1) printf "$minute $hour * * * root /sbin/reboot\n" > "$cron"; log "Ежедневно в $hour:$minute" ;;
+                    1) echo "$minute $hour * * * root /sbin/reboot" > "$cron"; log "Ежедневно в $hour:$minute" ;;
                     2)
                         echo "${c_txt}День недели:${c_off}"
                         echo "${c_txt}  1 — Понедельник${c_off}"
@@ -1015,12 +1092,12 @@ setup_scheduled_reboot() {
                         echo "${c_txt}  6 — Суббота${c_off}"
                         echo "${c_txt}  7 — Воскресенье${c_off}"
                         dow=$(ask "День" "1")
-                        printf "$minute $hour * * $dow root /sbin/reboot\n" > "$cron"
+                        echo "$minute $hour * * $dow root /sbin/reboot" > "$cron"
                         local day_names=("" "Понедельник" "Вторник" "Среда" "Четверг" "Пятница" "Суббота" "Воскресенье")
                         log "Еженедельно, ${day_names[$dow]} в $hour:$minute" ;;
                     3)
                         dom=$(ask "День месяца" "1")
-                        printf "$minute $hour $dom * * root /sbin/reboot\n" > "$cron"
+                        echo "$minute $hour $dom * * root /sbin/reboot" > "$cron"
                         log "Ежемесячно, $dom-го в $hour:$minute" ;;
                 esac
             fi
@@ -1104,7 +1181,7 @@ server_menu() {
         local pass_policy="выключена"; grep -q "pam_pwquality.so" /etc/pam.d/common-password 2>/dev/null && pass_policy="включена"
         local ssh_port=$(get_ssh_port)
         local ufw_status=$(ufw status 2>/dev/null | head -1 | awk '{print $2}' || echo '?')
-        local f2b_status=$(systemctl is-active fail2ban 2>/dev/null | head -1 | tr -d '[:space:]' || echo "inactive")
+        local f2b_status=$(systemctl is-active fail2ban 2>/dev/null | head -1 | tr -d '\n\r' || echo "inactive")
         local swap_status=$(swapon --show=SIZE --noheadings 2>/dev/null | head -1 || echo "нет")
         local sudo_log="выкл"; grep -q "^Defaults.*logfile=/var/log/sudo.log" /etc/sudoers 2>/dev/null && sudo_log="вкл"
         local root_mail="не настроено"; command -v msmtp >/dev/null && grep -qs "account default" /etc/msmtprc 2>/dev/null && root_mail="настроено"
