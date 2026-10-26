@@ -75,13 +75,14 @@ _t() {
             M19) echo "Language" ;;
             MQ)   echo "  ${c_num}0.${c_off} ${c_txt}Exit${c_off}" ;;
             MFTR) echo "-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-" ;;
+            SRV00) echo "System update" ;;
             SRV01) echo "Timezone" ;;
             SRV02) echo "Password policy" ;;
             SRV03) echo "Create user" ;;
             SRV04) echo "SSH settings" ;;
             SRV05) echo "UFW settings" ;;
             SRV06) echo "Fail2ban" ;;
-            SRV07) echo "BBR, IPv6, DNS" ;;
+            SRV07) echo "DNS settings" ;;
             SRV08) echo "Swap" ;;
             SRV09) echo "Sudo logging" ;;
             SRV10) echo "Root mail" ;;
@@ -115,13 +116,14 @@ _t() {
         M19) echo "Язык" ;;
         MQ)   echo "  ${c_num}0.${c_off} ${c_txt}Выход${c_off}" ;;
         MFTR) echo "-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-" ;;
+        SRV00) echo "Обновление системы" ;;
         SRV01) echo "Часовой пояс" ;;
         SRV02) echo "Политика паролей" ;;
         SRV03) echo "Создание пользователя" ;;
         SRV04) echo "Настройки SSH" ;;
         SRV05) echo "Настройки UFW" ;;
         SRV06) echo "Fail2ban" ;;
-        SRV07) echo "BBR, IPv6, DNS" ;;
+        SRV07) echo "Настроить DNS" ;;
         SRV08) echo "Swap" ;;
         SRV09) echo "Логирование sudo" ;;
         SRV10) echo "Почта root" ;;
@@ -210,6 +212,21 @@ cd "$CONFIG_ROOT" 2>/dev/null || { mkdir -p "$CONFIG_ROOT"; cd "$CONFIG_ROOT"; }
 
 # ========== ФУНКЦИИ ==========
 
+system_update() {
+    clear
+    echo "${c_mag}=== Обновление системы ===${c_off}"
+    echo "${c_txt}Обновление списка пакетов...${c_off}"
+    apt update -y && log "apt update выполнен"
+    echo "${c_txt}Обновление пакетов...${c_off}"
+    apt upgrade -y && log "apt upgrade выполнен"
+    echo "${c_txt}Удаление ненужных пакетов...${c_off}"
+    apt autoremove -y && log "apt autoremove выполнен"
+    echo "${c_txt}Очистка кэша...${c_off}"
+    apt autoclean -y && log "apt autoclean выполнен"
+    log "Обновление системы завершено"
+    read -rp "Enter — продолжить " _ || true
+}
+
 setup_timezone() {
     clear
     echo "${c_mag}=== Часовой пояс ===${c_off}"
@@ -239,37 +256,18 @@ configure_password_policy() {
     echo "${c_mag}=== Политика паролей ===${c_off}"
     require_cmd pam-auth-update libpam-pwquality
     
-    local status="неактивна"
+    local status="выключена"
     if grep -q "pam_pwquality.so" /etc/pam.d/common-password 2>/dev/null; then
-        status="активна"
+        status="включена"
     fi
     echo "${c_txt}Статус: $status${c_off}"
     echo ""
-    echo "${c_txt}1. Включить политику${c_off}"
-    echo "${c_txt}2. Отключить политику${c_off}"
+    echo "${c_txt}1. Настроить${c_off}"
     echo "${c_txt}0. Назад${c_off}"
     read -rp "Номер: " c || true
     case "$c" in
         1)
-            local pam_file="/etc/pam.d/common-password"
-            local pwquality_conf="/etc/security/pwquality.conf"
-            apt-get install -y libpam-pwquality
-            sed -i '/pam_pwquality.so/d' "$pam_file"
-            echo 'password requisite pam_pwquality.so retry=3 minlen=12 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 enforce_for_root' >> "$pam_file"
-            cat > "$pwquality_conf" <<EOF
-minlen = 12
-ucredit = -1
-lcredit = -1
-dcredit = -1
-ocredit = -1
-EOF
-            pam-auth-update --force
-            log "Политика паролей настроена и активирована"
-            read -rp "Enter — продолжить " _ || true ;;
-        2)
-            sed -i '/pam_pwquality.so/d' /etc/pam.d/common-password
-            pam-auth-update --force
-            log "Политика отключена"
+            pam-auth-update
             read -rp "Enter — продолжить " _ || true ;;
         0) return 0 ;;
     esac
@@ -301,8 +299,8 @@ get_ssh_port() {
 }
 
 ssh_settings_menu() {
-    clear
     while true; do
+        clear
         local port=$(get_ssh_port)
         local root_login=$(grep "^PermitRootLogin" /etc/ssh/sshd_config.d/99-homeserver.conf 2>/dev/null | awk '{print $2}' || echo "prohibit-password")
         local pass_auth=$(grep "^PasswordAuthentication" /etc/ssh/sshd_config.d/99-homeserver.conf 2>/dev/null | awk '{print $2}' || echo "yes")
@@ -347,13 +345,13 @@ ssh_settings_menu() {
                 echo "${c_txt}ssh-keygen -t ed25519${c_off}"
                 echo ""
                 echo "${c_mag}Загрузите ключ на сервер (Linux):${c_off}"
-                echo "${c_txt}ssh-copy-id -i ~/.ssh/id_ed25519.pub $username@$IP${c_off}"
+                echo "${c_txt}ssh-copy-id -i ~/.ssh/имяключа.pub $username@$IP${c_off}"
                 echo ""
                 echo "${c_mag}Команда для Windows:${c_off}"
-                echo "${c_txt}type %USERPROFILE%\\.ssh\\id_ed25519.pub | ssh $username@$IP \"cat >> ~/.ssh/authorized_keys\"${c_off}"
+                echo "${c_txt}type %USERPROFILE%\\.ssh\\имяключа.pub | ssh $username@$IP \"cat >> ~/.ssh/authorized_keys\"${c_off}"
                 echo ""
                 echo "${c_mag}Проверьте вход ключом:${c_off}"
-                echo "${c_txt}ssh -i ~/.ssh/id_ed25519 $username@$IP${c_off}"
+                echo "${c_txt}ssh -i ~/.ssh/имяключа $username@$IP${c_off}"
                 echo ""
                 echo "${c_mag}ТОЛЬКО ЕСЛИ ВХОД УСПЕШЕН, нажмите Enter для отключения пароля${c_off}"
                 echo "${c_mag}=======================================================================================${c_off}"
@@ -369,7 +367,7 @@ ssh_settings_menu() {
                 fi
                 
                 if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
-                    log "Вход по паролю отключён"
+                    log "Вход по паролю отключён, SSH перезапущен"
                 else
                     warn "Ошибка перезапуска SSH"
                 fi
@@ -379,12 +377,18 @@ ssh_settings_menu() {
                 mkdir -p /etc/ssh/sshd_config.d
                 if [[ "$pass_auth" == "yes" ]]; then
                     grep -q "^PasswordAuthentication" "$cfg" 2>/dev/null && sed -i 's|^PasswordAuthentication.*|PasswordAuthentication no|' "$cfg" || echo "PasswordAuthentication no" >> "$cfg"
-                    systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null
-                    log "Вход по паролю отключён"
+                    if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
+                        log "Вход по паролю отключён, SSH перезапущен"
+                    else
+                        warn "Ошибка перезапуска SSH"
+                    fi
                 else
                     grep -q "^PasswordAuthentication" "$cfg" 2>/dev/null && sed -i 's|^PasswordAuthentication.*|PasswordAuthentication yes|' "$cfg" || echo "PasswordAuthentication yes" >> "$cfg"
-                    systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null
-                    log "Вход по паролю включён"
+                    if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
+                        log "Вход по паролю включён, SSH перезапущен"
+                    else
+                        warn "Ошибка перезапуска SSH"
+                    fi
                 fi
                 read -rp "Enter — продолжить " _ || true ;;
             4)
@@ -400,8 +404,11 @@ ssh_settings_menu() {
                     *) new_val="prohibit-password" ;;
                 esac
                 grep -q "^PermitRootLogin" "$cfg" 2>/dev/null && sed -i "s|^PermitRootLogin.*|PermitRootLogin $new_val|" "$cfg" || echo "PermitRootLogin $new_val" >> "$cfg"
-                systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null
-                log "PermitRootLogin установлен в $new_val"
+                if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
+                    log "PermitRootLogin установлен в $new_val, SSH перезапущен"
+                else
+                    warn "Ошибка перезапуска SSH"
+                fi
                 read -rp "Enter — продолжить " _ || true ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
@@ -434,9 +441,9 @@ change_ssh_port_direct() {
 }
 
 ufw_settings_menu() {
-    clear
     require_cmd ufw ufw
     while true; do
+        clear
         local status=$(ufw status | head -1 | awk '{print $2}')
         local port=$(get_ssh_port)
         local abuse_status="выкл"; [[ -f /opt/homeserver/abuse-block.sh ]] && abuse_status="вкл"
@@ -540,12 +547,15 @@ block_rkn() {
     cat > "$script" <<'RKNEOF'
 #!/usr/bin/env bash
 set -e
-URL="https://raw.githubusercontent.com/zapret-info/z-i/master/nxdump.csv"
+URL="https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv.gz"
 TMP="$(mktemp)"
-if ! curl -fsSL --max-time 300 "$URL" -o "$TMP"; then
+TMPGZ="$(mktemp)"
+if ! curl -fsSL --max-time 300 "$URL" -o "$TMPGZ"; then
     echo "Ошибка загрузки списка РКН"
     exit 1
 fi
+gunzip -c "$TMPGZ" > "$TMP"
+rm -f "$TMPGZ"
 ipset create rkn4_tmp hash:net 2>/dev/null || true
 grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?' "$TMP" | sort -u | sed 's/^/add rkn4_tmp /' | ipset restore 2>/dev/null || true
 ipset create rkn4 hash:net 2>/dev/null || true
@@ -566,8 +576,8 @@ RKNEOF
 }
 
 swap_menu() {
-    clear
     while true; do
+        clear
         echo "${c_mag}=== Swap ===${c_off}"
         echo "${c_txt}Статус:${c_off}"
         free -h | grep -i swap
@@ -604,11 +614,11 @@ swap_menu() {
 }
 
 sudo_logging_menu() {
-    clear
     while true; do
+        clear
         echo "${c_mag}=== Логирование sudo ===${c_off}"
-        if [[ -f /etc/sudoers.d/99-homeserver-logging ]]; then
-            echo "${c_txt}Статус: ВКЛЮЧЕНО${c_off}"
+        if grep -q "^Defaults.*logfile=/var/log/sudo.log" /etc/sudoers 2>/dev/null; then
+            echo "${c_txt}Статус: включено${c_off}"
             if [[ -f /var/log/sudo.log ]]; then
                 echo "${c_txt}Последние записи:${c_off}"
                 tail -n 5 /var/log/sudo.log
@@ -620,7 +630,7 @@ sudo_logging_menu() {
                 fi
             fi
         else
-            echo "${c_txt}Статус: ВЫКЛЮЧЕНО${c_off}"
+            echo "${c_txt}Статус: выключено${c_off}"
         fi
         echo ""
         echo "${c_txt}1. Включить${c_off}"
@@ -630,14 +640,29 @@ sudo_logging_menu() {
         read -rp "Номер: " c || true
         case "$c" in
             1)
-                cat > /etc/sudoers.d/99-homeserver-logging <<'EOF'
-Defaults logfile=/var/log/sudo.log
-EOF
-                visudo -cf /etc/sudoers.d/99-homeserver-logging >/dev/null && log "Включено"
+                if ! grep -q "^Defaults.*logfile=/var/log/sudo.log" /etc/sudoers 2>/dev/null; then
+                    echo 'Defaults logfile="/var/log/sudo.log"' >> /etc/sudoers
+                    if visudo -cf /etc/sudoers >/dev/null; then
+                        log "Логирование sudo включено"
+                    else
+                        warn "Ошибка в конфигурации sudoers, откат изменений"
+                        sed -i '/^Defaults.*logfile=\/var\/log\/sudo.log$/d' /etc/sudoers
+                    fi
+                else
+                    log "Логирование sudo уже включено"
+                fi
                 read -rp "Enter — продолжить " _ || true ;;
             2)
-                rm -f /etc/sudoers.d/99-homeserver-logging
-                log "Отключено"
+                if grep -q "^Defaults.*logfile=/var/log/sudo.log" /etc/sudoers 2>/dev/null; then
+                    sed -i '/^Defaults.*logfile=\/var\/log\/sudo.log$/d' /etc/sudoers
+                    if visudo -cf /etc/sudoers >/dev/null; then
+                        log "Логирование sudo отключено"
+                    else
+                        warn "Ошибка в конфигурации sudoers"
+                    fi
+                else
+                    log "Логирование sudo уже отключено"
+                fi
                 read -rp "Enter — продолжить " _ || true ;;
             3)
                 require_cmd nano nano
@@ -649,23 +674,53 @@ EOF
 }
 
 fail2ban_menu() {
-    clear
     require_cmd fail2ban-client fail2ban
     while true; do
+        clear
         [[ -f "$ENV_FILE" ]] && load_env
         local bantime="${F2B_BANTIME:-7200}" maxretry="${F2B_MAXRETRY:-10}" findtime="${F2B_FINDTIME:-900}"
-        local f2b_status=$(systemctl is-active fail2ban 2>/dev/null | tr -d '\n' || echo "inactive")
+        local f2b_status=$(systemctl is-active fail2ban 2>/dev/null | head -1 | tr -d '[:space:]' || echo "inactive")
         
         echo "${c_mag}=== Fail2ban ===${c_off}"
         echo "${c_txt}Статус: $f2b_status${c_off}"
-        echo "${c_txt}bantime: ${bantime}с${c_off}"
-        echo "${c_txt}maxretry: $maxretry${c_off}"
-        echo "${c_txt}findtime: ${findtime}с${c_off}"
+        echo ""
+        echo "${c_txt}Порты, используемые приложениями:${c_off}"
+        
+        # Получаем список слушающих портов
+        require_cmd ss iproute2
+        local listening_ports=$(ss -tlnp 2>/dev/null | awk 'NR>1 {print $4}' | grep -oE '[0-9]+$' | sort -un)
+        
+        if [[ -n "$listening_ports" ]]; then
+            printf "  %-15s %-20s %s\n" "Порт" "Процесс" "Fail2ban"
+            printf "  %-15s %-20s %s\n" "---" "---" "---"
+            
+            for port in $listening_ports; do
+                # Получаем имя процесса для порта
+                local process=$(ss -tlnp 2>/dev/null | grep ":${port} " | grep -oP 'users:\(\("\K[^"]+' | head -1 || echo "unknown")
+                
+                # Проверяем, защищён ли порт fail2ban
+                local f2b_protected="выкл"
+                if fail2ban-client status 2>/dev/null | grep -q "$port"; then
+                    f2b_protected="✔ активен"
+                fi
+                
+                printf "  %-15s %-20s %s\n" "${port}/tcp" "$process" "$f2b_protected"
+            done
+        else
+            echo "${c_txt}  (нет слушающих портов)${c_off}"
+        fi
+        
+        echo ""
+        echo "${c_txt}Текущие настройки:${c_off}"
+        echo "${c_txt}  bantime: ${bantime}с${c_off}"
+        echo "${c_txt}  maxretry: $maxretry${c_off}"
+        echo "${c_txt}  findtime: ${findtime}с${c_off}"
         echo ""
         echo "${c_txt}1. Изменить bantime${c_off}"
         echo "${c_txt}2. Изменить maxretry${c_off}"
         echo "${c_txt}3. Изменить findtime${c_off}"
-        echo "${c_txt}4. Применить и перезапустить${c_off}"
+        echo "${c_txt}4. Выбрать порты для защиты${c_off}"
+        echo "${c_txt}5. Применить и перезапустить${c_off}"
         echo "${c_txt}0. Назад${c_off}"
         read -rp "Номер: " c || true
         case "$c" in
@@ -673,7 +728,12 @@ fail2ban_menu() {
             2) maxretry=$(ask "maxretry" "$maxretry"); update_env F2B_MAXRETRY "$maxretry" ;;
             3) findtime=$(ask "findtime, секунд" "$findtime"); update_env F2B_FINDTIME "$findtime" ;;
             4)
+                local ports; ports=$(ask "Порты через пробел" "$ssh_port")
+                update_env F2B_PORTS "$ports"
+                log "Порты для защиты: $ports" ;;
+            5)
                 local ssh_port=$(get_ssh_port)
+                local ports="${F2B_PORTS:-$ssh_port}"
                 cat > /etc/fail2ban/jail.d/99-homeserver.local <<EOF
 [DEFAULT]
 bantime   = $bantime
@@ -682,7 +742,7 @@ maxretry  = $maxretry
 
 [sshd]
 enabled  = true
-port     = $ssh_port
+port     = $ports
 logpath  = /var/log/auth.log
 EOF
                 systemctl enable --now fail2ban >/dev/null 2>&1
@@ -695,12 +755,12 @@ EOF
 }
 
 setup_network_bbr_ipv6_dns() {
-    clear
     while true; do
-        echo "${c_mag}=== BBR, IPv6, DNS ===${c_off}"
+        clear
+        echo "${c_mag}=== Настроить DNS ===${c_off}"
         echo "${c_txt}BBR: $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '?')${c_off}"
         echo "${c_txt}IPv6: $([ -f /etc/sysctl.d/99-homeserver-ipv6.conf ] && echo 'отключён' || echo 'включён')${c_off}"
-        echo "${c_txt}DNS-over-TLS: $([ -f /etc/systemd/resolved.conf.d/99-homeserver.conf ] && echo 'включён' || echo 'выкл')${c_off}"
+        echo "${c_txt}DNS: $([ -f /etc/systemd/resolved.conf.d/99-homeserver.conf ] && echo 'настроен' || echo 'не настроен')${c_off}"
         if [[ -f /etc/resolv.conf ]]; then
             echo "${c_txt}Текущие nameservers:${c_off}"
             grep "^nameserver" /etc/resolv.conf | sed 's/^/  /'
@@ -708,7 +768,7 @@ setup_network_bbr_ipv6_dns() {
         echo ""
         echo "${c_txt}1. BBR${c_off}"
         echo "${c_txt}2. IPv6${c_off}"
-        echo "${c_txt}3. DNS-over-TLS${c_off}"
+        echo "${c_txt}3. Настроить DNS${c_off}"
         echo "${c_txt}0. Назад${c_off}"
         read -rp "Номер: " c || true
         case "$c" in
@@ -729,23 +789,24 @@ setup_network_bbr_ipv6_dns() {
                 fi
                 read -rp "Enter — продолжить " _ || true ;;
             3)
-                local f=/etc/systemd/resolved.conf.d/99-homeserver.conf
-                if [[ -f "$f" ]]; then
-                    ask_yn "DoT включён — отключить?" && { rm -f "$f"; systemctl restart systemd-resolved; log "DoT отключён"; }
-                else
-                    require_cmd resolvectl systemd
-                    mkdir -p /etc/systemd/resolved.conf.d
-                    rm -f /etc/resolv.conf
-                    cat > /etc/resolv.conf <<EOF
+                if [[ -f /etc/systemd/resolved.conf.d/99-homeserver.conf ]]; then
+                    log "DNS уже настроен (DoT включён)"
+                    read -rp "Enter — продолжить " _ || true
+                    continue
+                fi
+                require_cmd resolvectl systemd
+                mkdir -p /etc/systemd/resolved.conf.d
+                rm -f /etc/resolv.conf
+                # Cloudflare DoT, Quad9 DoT, Google DoT
+                cat > /etc/resolv.conf <<EOF
 nameserver 1.1.1.1
 nameserver 9.9.9.9
 nameserver 8.8.8.8
 EOF
-                    chmod 644 /etc/resolv.conf
-                    printf '[Resolve]\nDNS=1.1.1.1#cloudflare-dns.com 9.9.9.9#dns.quad9.net 8.8.8.8#dns.google\nDNSOverTLS=opportunistic\nDomains=~.\n' > "$f"
-                    systemctl restart systemd-resolved
-                    log "DoT включён"
-                fi
+                chmod 644 /etc/resolv.conf
+                printf '[Resolve]\nDNS=1.1.1.1#cloudflare-dns.com 9.9.9.9#dns.quad9.net 8.8.8.8#dns.google\nDNSOverTLS=opportunistic\nDomains=~.\n' > /etc/systemd/resolved.conf.d/99-homeserver.conf
+                systemctl restart systemd-resolved
+                log "DNS настроен (DoT: Cloudflare, Quad9, Google)"
                 read -rp "Enter — продолжить " _ || true ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
@@ -757,13 +818,13 @@ unattended_upgrades_setup() {
     clear
     echo "${c_mag}=== Unattended upgrades ===${c_off}"
     if dpkg -l unattended-upgrades 2>/dev/null | grep -q '^ii'; then
-        echo "${c_txt}Статус: УСТАНОВЛЕНО${c_off}"
+        echo "${c_txt}Статус: установлено${c_off}"
         if ask_yn "Отключить?"; then
             apt-get remove -y unattended-upgrades
             log "Удалено"
         fi
     else
-        echo "${c_txt}Статус: НЕ УСТАНОВЛЕНО${c_off}"
+        echo "${c_txt}Статус: не установлено${c_off}"
         if ask_yn "Установить?"; then
             apt-get install -y unattended-upgrades
             printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' > /etc/apt/apt.conf.d/20auto-upgrades
@@ -777,13 +838,13 @@ root_mail_setup() {
     clear
     echo "${c_mag}=== Почта root ===${c_off}"
     if command -v msmtp >/dev/null && grep -qs "account default" /etc/msmtprc 2>/dev/null; then
-        echo "${c_txt}Статус: НАСТРОЕНО${c_off}"
+        echo "${c_txt}Статус: настроено${c_off}"
         grep -E '^(host|port|from):' /etc/msmtprc | sed 's/^/  /'
         if ! ask_yn "Перенастроить?"; then
             return
         fi
     else
-        echo "${c_txt}Статус: НЕ НАСТРОЕНО${c_off}"
+        echo "${c_txt}Статус: не настроено${c_off}"
     fi
     require_cmd msmtp msmtp
     local host port user pass rcpt
@@ -814,14 +875,14 @@ EOF
 }
 
 shell_history_setup() {
-    clear
     while true; do
+        clear
         echo "${c_mag}=== История shell ===${c_off}"
         if [[ -f /etc/profile.d/99-homeserver-history.sh ]]; then
-            echo "${c_txt}Статус: НАСТРОЕНО${c_off}"
+            echo "${c_txt}Статус: включено${c_off}"
             echo "${c_txt}HISTSIZE: $(grep HISTSIZE /etc/profile.d/99-homeserver-history.sh | cut -d= -f2)${c_off}"
         else
-            echo "${c_txt}Статус: НЕ НАСТРОЕНО${c_off}"
+            echo "${c_txt}Статус: выключено${c_off}"
         fi
         echo ""
         echo "${c_txt}1. Включить/отключить${c_off}"
@@ -836,8 +897,8 @@ shell_history_setup() {
                 else
                     cat > /etc/profile.d/99-homeserver-history.sh <<'EOF'
 export HISTTIMEFORMAT="%F %T  "
-export HISTSIZE=100000
-export HISTFILESIZE=200000
+export HISTSIZE=10000
+export HISTFILESIZE=20000
 export HISTCONTROL=ignoredups:erasedups
 shopt -s histappend
 PROMPT_COMMAND="history -a; history -c; history -r${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
@@ -847,10 +908,14 @@ EOF
                 read -rp "Enter — продолжить " _ || true ;;
             2)
                 require_cmd nano nano
-                if [[ -f ~/.bash_history ]]; then
+                if [[ -f ~/.bash_history ]] && [[ -s ~/.bash_history ]]; then
                     nano ~/.bash_history
                 else
-                    warn "История пока пуста"
+                    echo "${c_txt}История пуста${c_off}"
+                    if ask_yn "Добавить тестовую строку?"; then
+                        echo "test_command_$(date +%s)" >> ~/.bash_history
+                        log "Тестовая строка добавлена"
+                    fi
                     read -rp "Enter — продолжить " _ || true
                 fi ;;
             0) return 0 ;;
@@ -867,6 +932,20 @@ setup_scheduled_reboot() {
     if [[ -f "$cron" ]]; then
         local schedule=$(cat "$cron" | grep -v '^#' | grep -v '^$')
         echo "${c_txt}Текущее: $schedule${c_off}"
+        
+        # Парсим cron для человекопонятного описания
+        local minute hour dom dow
+        read -r minute hour dom dow _ <<< "$schedule"
+        local desc=""
+        if [[ "$dom" == "*" && "$dow" == "*" ]]; then
+            desc="Ежедневно в $(printf '%02d' "$hour"):$(printf '%02d' "$minute")"
+        elif [[ "$dom" == "*" ]]; then
+            local day_names=("" "Понедельник" "Вторник" "Среда" "Четверг" "Пятница" "Суббота" "Воскресенье")
+            desc="Еженедельно, ${day_names[$dow]} в $(printf '%02d' "$hour"):$(printf '%02d' "$minute")"
+        else
+            desc="Ежемесячно, ${dom}-го числа в $(printf '%02d' "$hour"):$(printf '%02d' "$minute")"
+        fi
+        echo "${c_txt}$desc${c_off}"
         echo ""
         echo "${c_txt}1. Выключить${c_off}"
         echo "${c_txt}2. Изменить${c_off}"
@@ -957,12 +1036,18 @@ diag_menu() {
     echo "${c_txt}1) vps-audit${c_off}"
     echo "${c_txt}2) ipregion${c_off}"
     echo "${c_txt}3) LemonBench${c_off}"
+    echo "${c_txt}4) IP Quality${c_off}"
+    echo "${c_txt}5) chkrootkit${c_off}"
+    echo "${c_txt}6) rkhunter${c_off}"
     echo "${c_txt}0) Назад${c_off}"
-    local n; n=$(ask "1-3" "")
+    local n; n=$(ask "1-6" "")
     case "$n" in
         1) curl -O https://raw.githubusercontent.com/vernu/vps-audit/main/vps-audit.sh && chmod +x vps-audit.sh && ./vps-audit.sh ;;
         2) wget -O ipregion.sh https://ipregion.vrnt.xyz && chmod +x ipregion.sh && ./ipregion.sh ;;
         3) bash <(curl -fsSL https://raw.githubusercontent.com/LemonBench/LemonBench/main/LemonBench.sh) fast ;;
+        4) bash <(curl -sL https://Check.Place) -EI ;;
+        5) require_cmd chkrootkit chkrootkit && chkrootkit ;;
+        6) require_cmd rkhunter rkhunter && rkhunter --check --skip-keypress ;;
         0) return 0 ;;
     esac
     read -rp "Enter — продолжить " _ || true
@@ -1016,52 +1101,54 @@ server_menu() {
     while true; do
         clear
         local tz=$(timedatectl show --property=Timezone --value 2>/dev/null || echo '?')
-        local pass_policy="неактивна"; grep -q "pam_pwquality.so" /etc/pam.d/common-password 2>/dev/null && pass_policy="активна"
+        local pass_policy="выключена"; grep -q "pam_pwquality.so" /etc/pam.d/common-password 2>/dev/null && pass_policy="включена"
         local ssh_port=$(get_ssh_port)
         local ufw_status=$(ufw status 2>/dev/null | head -1 | awk '{print $2}' || echo '?')
-        local f2b_status=$(systemctl is-active fail2ban 2>/dev/null | tr -d '\n' || echo "inactive")
+        local f2b_status=$(systemctl is-active fail2ban 2>/dev/null | head -1 | tr -d '[:space:]' || echo "inactive")
         local swap_status=$(swapon --show=SIZE --noheadings 2>/dev/null | head -1 || echo "нет")
-        local sudo_log="выкл"; [[ -f /etc/sudoers.d/99-homeserver-logging ]] && sudo_log="вкл"
+        local sudo_log="выкл"; grep -q "^Defaults.*logfile=/var/log/sudo.log" /etc/sudoers 2>/dev/null && sudo_log="вкл"
         local root_mail="не настроено"; command -v msmtp >/dev/null && grep -qs "account default" /etc/msmtprc 2>/dev/null && root_mail="настроено"
-        local shell_hist="не настроено"; [[ -f /etc/profile.d/99-homeserver-history.sh ]] && shell_hist="настроено"
+        local shell_hist="выключено"; [[ -f /etc/profile.d/99-homeserver-history.sh ]] && shell_hist="включено"
         local unattended="выкл"; dpkg -l unattended-upgrades 2>/dev/null | grep -q '^ii' && unattended="вкл"
         local reboot="не настроено"; [[ -f /etc/cron.d/homeserver-reboot ]] && reboot="настроено"
         
         cat <<SUM
-${c_mag}$(_t SRV01)${c_off}
-  ${c_num}1.${c_off} ${c_txt}$(_t SRV01): $tz${c_off}
-  ${c_num}2.${c_off} ${c_txt}$(_t SRV02): $pass_policy${c_off}
-  ${c_num}3.${c_off} ${c_txt}$(_t SRV03)${c_off}
-  ${c_num}4.${c_off} ${c_txt}$(_t SRV04): порт $ssh_port${c_off}
-  ${c_num}5.${c_off} ${c_txt}$(_t SRV05): $ufw_status${c_off}
-  ${c_num}6.${c_off} ${c_txt}$(_t SRV06): $f2b_status${c_off}
-  ${c_num}7.${c_off} ${c_txt}$(_t SRV07)${c_off}
-  ${c_num}8.${c_off} ${c_txt}$(_t SRV08): $swap_status${c_off}
-  ${c_num}9.${c_off} ${c_txt}$(_t SRV09): $sudo_log${c_off}
-  ${c_num}10.${c_off} ${c_txt}$(_t SRV10): $root_mail${c_off}
-  ${c_num}11.${c_off} ${c_txt}$(_t SRV11): $shell_hist${c_off}
-  ${c_num}12.${c_off} ${c_txt}$(_t SRV12): $unattended${c_off}
-  ${c_num}13.${c_off} ${c_txt}$(_t SRV13): $reboot${c_off}
-  ${c_num}14.${c_off} ${c_txt}$(_t SRV14)${c_off}
+${c_mag}$(_t SRV00)${c_off}
+  ${c_num}1.${c_off} ${c_txt}$(_t SRV00)${c_off}
+  ${c_num}2.${c_off} ${c_txt}$(_t SRV01): $tz${c_off}
+  ${c_num}3.${c_off} ${c_txt}$(_t SRV02): $pass_policy${c_off}
+  ${c_num}4.${c_off} ${c_txt}$(_t SRV03)${c_off}
+  ${c_num}5.${c_off} ${c_txt}$(_t SRV04): порт $ssh_port${c_off}
+  ${c_num}6.${c_off} ${c_txt}$(_t SRV05): $ufw_status${c_off}
+  ${c_num}7.${c_off} ${c_txt}$(_t SRV06): $f2b_status${c_off}
+  ${c_num}8.${c_off} ${c_txt}$(_t SRV07)${c_off}
+  ${c_num}9.${c_off} ${c_txt}$(_t SRV08): $swap_status${c_off}
+  ${c_num}10.${c_off} ${c_txt}$(_t SRV09): $sudo_log${c_off}
+  ${c_num}11.${c_off} ${c_txt}$(_t SRV10): $root_mail${c_off}
+  ${c_num}12.${c_off} ${c_txt}$(_t SRV11): $shell_hist${c_off}
+  ${c_num}13.${c_off} ${c_txt}$(_t SRV12): $unattended${c_off}
+  ${c_num}14.${c_off} ${c_txt}$(_t SRV13): $reboot${c_off}
+  ${c_num}15.${c_off} ${c_txt}$(_t SRV14)${c_off}
   ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 
 SUM
         read -rp "Номер: " c || true
         case "$c" in
-            1) setup_timezone ;;
-            2) configure_password_policy ;;
-            3) create_user ;;
-            4) ssh_settings_menu ;;
-            5) ufw_settings_menu ;;
-            6) fail2ban_menu ;;
-            7) setup_network_bbr_ipv6_dns ;;
-            8) swap_menu ;;
-            9) sudo_logging_menu ;;
-            10) root_mail_setup ;;
-            11) shell_history_setup ;;
-            12) unattended_upgrades_setup ;;
-            13) setup_scheduled_reboot ;;
-            14) diag_menu ;;
+            1) system_update ;;
+            2) setup_timezone ;;
+            3) configure_password_policy ;;
+            4) create_user ;;
+            5) ssh_settings_menu ;;
+            6) ufw_settings_menu ;;
+            7) fail2ban_menu ;;
+            8) setup_network_bbr_ipv6_dns ;;
+            9) swap_menu ;;
+            10) sudo_logging_menu ;;
+            11) root_mail_setup ;;
+            12) shell_history_setup ;;
+            13) unattended_upgrades_setup ;;
+            14) setup_scheduled_reboot ;;
+            15) diag_menu ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
         esac

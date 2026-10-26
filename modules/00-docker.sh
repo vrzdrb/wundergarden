@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# Цветовые переменные (на случай, если не загружены из основного скрипта)
+c_txt=${c_txt:-$'\033[96m'}
+c_off=${c_off:-$'\033[0m'}
+
 install_docker() {
     if docker compose version >/dev/null 2>&1; then
         log "Docker уже установлен: $(docker --version)"
@@ -599,6 +603,20 @@ prep_system() {
     log "=== Подготовка системы ==="
     command -v openssl >/dev/null || apt-get install -y -qq openssl
     install_docker
+
+    # Спрашиваем о добавлении пользователей в группу docker
+    echo "${c_txt}Каких пользователей добавить в группу docker? (через пробел, Enter — пропустить)${c_off}"
+    local docker_users
+    read -rp "Пользователи: " docker_users || true
+    if [[ -n "$docker_users" ]]; then
+        for user in $docker_users; do
+            if id "$user" >/dev/null 2>&1; then
+                usermod -aG docker "$user" && log "Пользователь $user добавлен в группу docker"
+            else
+                warn "Пользователь $user не найден"
+            fi
+        done
+    fi
 
     # Читаем часовой пояс из системы (настроен в подменю "Настройка сервера")
     local tz
