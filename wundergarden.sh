@@ -219,8 +219,8 @@ system_update() {
     apt update -y && log "apt update выполнен"
     echo "${c_txt}Обновление пакетов...${c_off}"
     apt upgrade -y && log "apt upgrade выполнен"
-    echo "${c_txt}Установка базовых утилит (mc, htop)...${c_off}"
-    apt install -y mc htop && log "mc и htop установлены"
+    echo "${c_txt}Установка базовых утилит и сервисов безопасности...${c_off}"
+    apt install -y mc htop cron ipset ufw fail2ban chkrootkit rkhunter && log "Установлены: mc, htop, cron, ipset, ufw, fail2ban, chkrootkit, rkhunter"
     echo "${c_txt}Удаление ненужных пакетов...${c_off}"
     apt autoremove -y && log "apt autoremove выполнен"
     echo "${c_txt}Очистка кэша...${c_off}"
@@ -727,6 +727,7 @@ block_rkn() {
     clear
     require_cmd ipset ipset
     require_cmd wget wget
+    require_cmd crontab cron
     echo "${c_mag}=== Блокировка IP-адресов РКН ===${c_off}"
     echo "${c_txt}Источник: github.com/C24Be/AS_Network_List${c_off}"
     
@@ -859,7 +860,7 @@ sudo_logging_menu() {
                         sed -i '/^Defaults.*logfile=\/var\/log\/sudo.log$/d' /etc/sudoers
                     fi
                 else
-                    log "Логирование sudo уже включено"
+                    log "Логирование sudo включено"
                 fi
                 read -rp "Enter — продолжить " _ || true ;;
             2)
@@ -871,7 +872,7 @@ sudo_logging_menu() {
                         warn "Ошибка в конфигурации sudoers"
                     fi
                 else
-                    log "Логирование sudo уже отключено"
+                    log "Логирование sudo отключено"
                 fi
                 read -rp "Enter — продолжить " _ || true ;;
             3)
@@ -902,14 +903,27 @@ sudo_logging_menu() {
 
 fail2ban_menu() {
     require_cmd fail2ban-client fail2ban
+    local jail_file="/etc/fail2ban/jail.local"
+    
     while true; do
         clear
-        [[ -f "$ENV_FILE" ]] && load_env
-        local bantime="${F2B_BANTIME:-7200}" maxretry="${F2B_MAXRETRY:-10}" findtime="${F2B_FINDTIME:-900}"
-        local f2b_status=$(systemctl is-active fail2ban 2>/dev/null | tr -d '[:space:]' || echo "inactive")
+        # Получаем статус fail2ban
+        local f2b_status=$(systemctl is-active fail2ban 2>/dev/null || echo "inactive")
+        
+        # Читаем текущие настройки из jail.local
+        local bantime="3600" maxretry="5" findtime="600" current_ports=""
+        if [[ -f "$jail_file" ]]; then
+            bantime=$(grep -E "^bantime\s*=" "$jail_file" | head -n 1 | cut -d'=' -f2 | tr -d ' ' || echo "3600")
+            maxretry=$(grep -E "^maxretry\s*=" "$jail_file" | head -n 1 | cut -d'=' -f2 | tr -d ' ' || echo "5")
+            findtime=$(grep -E "^findtime\s*=" "$jail_file" | head -n 1 | cut -d'=' -f2 | tr -d ' ' || echo "600")
+            current_ports=$(grep -E "^port\s*=" "$jail_file" | head -n 1 | cut -d'=' -f2 | tr -d ' ' || echo "")
+        fi
         
         echo "${c_mag}=== Fail2ban ===${c_off}"
-        echo "${c_txt}Статус: $f2b_status${c_off}"
+        # Показываем статус только если active
+        if [[ "$f2b_status" == "active" ]]; then
+            echo "${c_txt}Статус: active${c_off}"
+        fi
         echo ""
         echo "${c_txt}Порты, используемые приложениями:${c_off}"
         
@@ -942,43 +956,112 @@ fail2ban_menu() {
         echo "${c_txt}  bantime: ${bantime}с${c_off}"
         echo "${c_txt}  maxretry: $maxretry${c_off}"
         echo "${c_txt}  findtime: ${findtime}с${c_off}"
+        if [[ -n "$current_ports" ]]; then
+            echo "${c_txt}  порты: $current_ports${c_off}"
+        fi
         echo ""
-        echo "${c_txt}1. Изменить bantime${c_off}"
-        echo "${c_txt}2. Изменить maxretry${c_off}"
-        echo "${c_txt}3. Изменить findtime${c_off}"
-        echo "${c_txt}4. Выбрать порты для защиты${c_off}"
-        echo "${c_txt}5. Применить и перезапустить${c_off}"
+        echo "${c_txt}1. Установить/переустановить Fail2ban${c_off}"
+        echo "${c_txt}2. Изменить порты для защиты${c_off}"
+        echo "${c_txt}3. Изменить bantime${c_off}"
+        echo "${c_txt}4. Изменить maxretry${c_off}"
+        echo "${c_txt}5. Изменить findtime${c_off}"
         echo "${c_txt}0. Назад${c_off}"
         read -rp "Номер: " c || true
         case "$c" in
-            1) bantime=$(ask "bantime, секунд" "$bantime"); update_env F2B_BANTIME "$bantime" ;;
-            2) maxretry=$(ask "maxretry" "$maxretry"); update_env F2B_MAXRETRY "$maxretry" ;;
-            3) findtime=$(ask "findtime, секунд" "$findtime"); update_env F2B_FINDTIME "$findtime" ;;
-            4)
-                local ports; ports=$(ask "Порты через пробел" "$ssh_port")
-                # Записываем напрямую в .env, обходя проверку has_forbidden
-                if grep -q "^F2B_PORTS=" "$ENV_FILE" 2>/dev/null; then
-                    sed -i "s|^F2B_PORTS=.*|F2B_PORTS=$ports|" "$ENV_FILE"
-                else
-                    echo "F2B_PORTS=$ports" >> "$ENV_FILE"
-                fi
-                log "Порты для защиты: $ports" ;;
-            5)
+            1)
+                # Установка/переустановка Fail2ban (из vps_autosetup)
                 local ssh_port=$(get_ssh_port)
-                local ports="${F2B_PORTS:-$ssh_port}"
-                cat > /etc/fail2ban/jail.d/99-homeserver.local <<EOF
+                echo "${c_txt}Текущий порт SSH: $ssh_port${c_off}"
+                local ports_input; ports_input=$(ask "Введите порты для защиты через запятую (например, $ssh_port,80,443)" "$ssh_port")
+                local maxretry_input; maxretry_input=$(ask "Введите максимальное число неудачных попыток (maxretry)" "5")
+                local bantime_input; bantime_input=$(ask "Введите время блокировки в секундах (bantime)" "3600")
+                
+                cat > "$jail_file" <<EOF
 [DEFAULT]
-bantime   = $bantime
-findtime  = $findtime
-maxretry  = $maxretry
+ignoreip = 127.0.0.1/8 ::1
+bantime  = $bantime_input
+findtime = 600
+maxretry = $maxretry_input
 
 [sshd]
-enabled  = true
-port     = $ports
-logpath  = /var/log/auth.log
+enabled = true
+port = $ports_input
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = $maxretry_input
 EOF
-                systemctl enable --now fail2ban >/dev/null 2>&1
-                systemctl restart fail2ban && log "Fail2ban перезапущен"
+                
+                systemctl enable fail2ban
+                systemctl restart fail2ban
+                log "Fail2ban установлен и настроен на порты: $ports_input"
+                read -rp "Enter — продолжить " _ || true ;;
+            2)
+                # Изменение портов (из vps_autosetup)
+                if [[ ! -f "$jail_file" ]]; then
+                    warn "Fail2ban не установлен. Сначала выполните пункт 1"
+                    read -rp "Enter — продолжить " _ || true
+                    continue
+                fi
+                
+                echo "${c_txt}Текущие порты: ${current_ports:-не указаны}${c_off}"
+                local new_ports; new_ports=$(ask "Введите новые порты для защиты через запятую (например, 2222,80,443)" "")
+                
+                if [[ -z "$new_ports" ]]; then
+                    warn "Ввод пустой, изменения отменены"
+                else
+                    if grep -q "^port\s*=" "$jail_file"; then
+                        sed -i "s/^port\s*=.*/port = $new_ports/" "$jail_file"
+                    else
+                        sed -i "/^\[sshd\]/,/^\[/ s/enabled = true/enabled = true\nport = $new_ports/" "$jail_file"
+                    fi
+                    systemctl restart fail2ban
+                    log "Порты обновлены на: $new_ports. Fail2ban перезапущен"
+                fi
+                read -rp "Enter — продолжить " _ || true ;;
+            3)
+                # Изменить bantime
+                if [[ ! -f "$jail_file" ]]; then
+                    warn "Fail2ban не установлен. Сначала выполните пункт 1"
+                    read -rp "Enter — продолжить " _ || true
+                    continue
+                fi
+                
+                local new_bantime; new_bantime=$(ask "Введите bantime в секундах" "$bantime")
+                if grep -q "^bantime\s*=" "$jail_file"; then
+                    sed -i "s/^bantime\s*=.*/bantime = $new_bantime/" "$jail_file"
+                fi
+                systemctl restart fail2ban
+                log "bantime обновлён на: $new_bantime"
+                read -rp "Enter — продолжить " _ || true ;;
+            4)
+                # Изменить maxretry
+                if [[ ! -f "$jail_file" ]]; then
+                    warn "Fail2ban не установлен. Сначала выполните пункт 1"
+                    read -rp "Enter — продолжить " _ || true
+                    continue
+                fi
+                
+                local new_maxretry; new_maxretry=$(ask "Введите maxretry" "$maxretry")
+                if grep -q "^maxretry\s*=" "$jail_file"; then
+                    sed -i "s/^maxretry\s*=.*/maxretry = $new_maxretry/" "$jail_file"
+                fi
+                systemctl restart fail2ban
+                log "maxretry обновлён на: $new_maxretry"
+                read -rp "Enter — продолжить " _ || true ;;
+            5)
+                # Изменить findtime
+                if [[ ! -f "$jail_file" ]]; then
+                    warn "Fail2ban не установлен. Сначала выполните пункт 1"
+                    read -rp "Enter — продолжить " _ || true
+                    continue
+                fi
+                
+                local new_findtime; new_findtime=$(ask "Введите findtime в секундах" "$findtime")
+                if grep -q "^findtime\s*=" "$jail_file"; then
+                    sed -i "s/^findtime\s*=.*/findtime = $new_findtime/" "$jail_file"
+                fi
+                systemctl restart fail2ban
+                log "findtime обновлён на: $new_findtime"
                 read -rp "Enter — продолжить " _ || true ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
@@ -1170,13 +1253,19 @@ setup_scheduled_reboot() {
         # Извлекаем только первые 5 полей (минуты, часы, день месяца, месяц, день недели)
         read -r minute hour dom dow _ <<< "$(echo "$schedule" | awk '{print $1, $2, $3, $4, $5}')"
         local desc=""
-        if [[ "$dom" == "*" && "$dow" == "*" ]]; then
-            desc="Ежедневно в $(printf '%02d' "$hour"):$(printf '%02d' "$minute")"
-        elif [[ "$dom" == "*" ]]; then
-            local day_names=("" "Понедельник" "Вторник" "Среда" "Четверг" "Пятница" "Суббота" "Воскресенье")
-            desc="Еженедельно, ${day_names[$dow]} в $(printf '%02d' "$hour"):$(printf '%02d' "$minute")"
+        
+        # Проверяем, что hour и minute являются числами
+        if [[ "$hour" =~ ^[0-9]+$ && "$minute" =~ ^[0-9]+$ ]]; then
+            if [[ "$dom" == "*" && "$dow" == "*" ]]; then
+                desc="Ежедневно в $(printf '%02d' "$hour"):$(printf '%02d' "$minute")"
+            elif [[ "$dom" == "*" ]]; then
+                local day_names=("" "Понедельник" "Вторник" "Среда" "Четверг" "Пятница" "Суббота" "Воскресенье")
+                desc="Еженедельно, ${day_names[$dow]} в $(printf '%02d' "$hour"):$(printf '%02d' "$minute")"
+            else
+                desc="Ежемесячно, ${dom}-го числа в $(printf '%02d' "$hour"):$(printf '%02d' "$minute")"
+            fi
         else
-            desc="Ежемесячно, ${dom}-го числа в $(printf '%02d' "$hour"):$(printf '%02d' "$minute")"
+            desc="Не удалось распарсить расписание"
         fi
         echo "${c_txt}$desc${c_off}"
         echo ""
