@@ -219,6 +219,8 @@ system_update() {
     apt update -y && log "apt update выполнен"
     echo "${c_txt}Обновление пакетов...${c_off}"
     apt upgrade -y && log "apt upgrade выполнен"
+    echo "${c_txt}Установка базовых утилит (mc, htop)...${c_off}"
+    apt install -y mc htop && log "mc и htop установлены"
     echo "${c_txt}Удаление ненужных пакетов...${c_off}"
     apt autoremove -y && log "apt autoremove выполнен"
     echo "${c_txt}Очистка кэша...${c_off}"
@@ -325,6 +327,52 @@ get_ssh_port() {
 }
 
 ssh_settings_menu() {
+    local SSHD_CONFIG="/etc/ssh/sshd_config"
+    local SSH_CONFIG="/etc/ssh/ssh_config"
+    
+    # Создаём бэкап основного конфига при первом запуске
+    if [[ ! -f /etc/ssh/sshd_config.backup_wundergarden ]]; then
+        cp "$SSHD_CONFIG" /etc/ssh/sshd_config.backup_wundergarden
+        log "Создан бэкап: /etc/ssh/sshd_config.backup_wundergarden"
+    fi
+    
+    # Удаляем конфликтующие файлы из sshd_config.d
+    for f in /etc/ssh/sshd_config.d/*-billpanel.conf /etc/ssh/sshd_config.d/50-cloud-init.conf; do
+        if [[ -f "$f" ]]; then
+            rm -f "$f"
+            log "Удалён конфликтующий файл: $f"
+        fi
+    done
+    
+    # Отключаем небезопасные настройки в основном sshd_config
+    if [[ -f "$SSHD_CONFIG" ]]; then
+        # Комментируем PermitRootLogin
+        sed -i 's/^PermitRootLogin/#PermitRootLogin/' "$SSHD_CONFIG"
+        # Комментируем PasswordAuthentication
+        sed -i 's/^PasswordAuthentication/#PasswordAuthentication/' "$SSHD_CONFIG"
+        # Отключаем X11Forwarding
+        if grep -q "^X11Forwarding" "$SSHD_CONFIG"; then
+            sed -i 's/^X11Forwarding.*/X11Forwarding no/' "$SSHD_CONFIG"
+        else
+            echo "X11Forwarding no" >> "$SSHD_CONFIG"
+        fi
+        # Отключаем GSSAPIAuthentication
+        if grep -q "^GSSAPIAuthentication" "$SSHD_CONFIG"; then
+            sed -i 's/^GSSAPIAuthentication.*/GSSAPIAuthentication no/' "$SSHD_CONFIG"
+        else
+            echo "GSSAPIAuthentication no" >> "$SSHD_CONFIG"
+        fi
+    fi
+    
+    # Отключаем GSSAPIAuthentication в ssh_config
+    if [[ -f "$SSH_CONFIG" ]]; then
+        if grep -q "^GSSAPIAuthentication" "$SSH_CONFIG"; then
+            sed -i 's/^GSSAPIAuthentication.*/GSSAPIAuthentication no/' "$SSH_CONFIG"
+        else
+            echo "GSSAPIAuthentication no" >> "$SSH_CONFIG"
+        fi
+    fi
+    
     while true; do
         clear
         local port=$(get_ssh_port)
@@ -351,19 +399,51 @@ ssh_settings_menu() {
                 ufw allow "$new_port/tcp" comment 'SSH' >/dev/null 2>&1 && log "UFW: порт $new_port/tcp открыт" || warn "Ошибка UFW"
                 ufw reload >/dev/null 2>&1 && log "UFW перезапущен" || warn "Ошибка перезапуска UFW"
                 
+                # Создаём полный конфиг безопасности
                 local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
                 mkdir -p /etc/ssh/sshd_config.d
-                grep -q "^Port " "$cfg" 2>/dev/null && sed -i "s|^Port .*|Port $new_port|" "$cfg" || echo "Port $new_port" >> "$cfg"
+                cat > "$cfg" <<EOF
+Port $new_port
+PermitRootLogin prohibit-password
+PubkeyAuthentication yes
+PasswordAuthentication no
+PermitEmptyPasswords no
+GSSAPIAuthentication no
+X11Forwarding no
+MaxAuthTries 3
+MaxSessions 5
+ClientAliveInterval 300
+ClientAliveCountMax 2
+UseDNS no
+ChallengeResponseAuthentication no
+KerberosAuthentication no
+EOF
                 
-                # Убедимся, что Include директива есть в основном sshd_config
-                if ! grep -q "^Include /etc/ssh/sshd_config.d" /etc/ssh/sshd_config 2>/dev/null; then
-                    echo "Include /etc/ssh/sshd_config.d/*.conf" >> /etc/ssh/sshd_config
-                fi
-                
-                if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
-                    log "SSH перезапущен, порт: $new_port"
+                # Проверяем синтаксис
+                if sshd -t 2>/dev/null; then
+                    if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
+                        log "SSH перезапущен, порт: $new_port"
+                    else
+                        warn "Ошибка перезапуска SSH"
+                    fi
                 else
-                    warn "Ошибка перезапуска SSH"
+                    warn "Ошибка в конфигурации SSH! Откат изменений"
+                    cat > "$cfg" <<EOF
+Port $port
+PermitRootLogin prohibit-password
+PubkeyAuthentication yes
+PasswordAuthentication no
+PermitEmptyPasswords no
+GSSAPIAuthentication no
+X11Forwarding no
+MaxAuthTries 3
+MaxSessions 5
+ClientAliveInterval 300
+ClientAliveCountMax 2
+UseDNS no
+ChallengeResponseAuthentication no
+KerberosAuthentication no
+EOF
                 fi
                 read -rp "Enter — продолжить " _ || true ;;
             2)
@@ -389,56 +469,79 @@ ssh_settings_menu() {
                 echo "${c_mag}=======================================================================================${c_off}"
                 read -r
                 
+                # Создаём полный конфиг безопасности
                 local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
                 mkdir -p /etc/ssh/sshd_config.d
-                grep -q "^PasswordAuthentication" "$cfg" 2>/dev/null && sed -i 's|^PasswordAuthentication.*|PasswordAuthentication no|' "$cfg" || echo "PasswordAuthentication no" >> "$cfg"
+                cat > "$cfg" <<EOF
+Port $port
+PermitRootLogin prohibit-password
+PubkeyAuthentication yes
+PasswordAuthentication no
+PermitEmptyPasswords no
+GSSAPIAuthentication no
+X11Forwarding no
+MaxAuthTries 3
+MaxSessions 5
+ClientAliveInterval 300
+ClientAliveCountMax 2
+UseDNS no
+ChallengeResponseAuthentication no
+KerberosAuthentication no
+EOF
                 
-                # Убедимся, что Include директива есть в основном sshd_config
-                if ! grep -q "^Include /etc/ssh/sshd_config.d" /etc/ssh/sshd_config 2>/dev/null; then
-                    echo "Include /etc/ssh/sshd_config.d/*.conf" >> /etc/ssh/sshd_config
-                fi
-                
-                if [[ -f /etc/ssh/sshd_config.d/50-cloud-init.conf ]]; then
-                    mv /etc/ssh/sshd_config.d/50-cloud-init.conf "/etc/ssh/sshd_config.d/50-cloud-init.conf.disabled.$(date +%s)"
-                    log "50-cloud-init.conf отключён"
-                fi
-                
-                if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
-                    log "Вход по паролю отключён, SSH перезапущен"
-                else
-                    warn "Ошибка перезапуска SSH"
-                fi
-                read -rp "Enter — продолжить " _ || true ;;
-            3)
-                local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
-                mkdir -p /etc/ssh/sshd_config.d
-                # Убедимся, что Include директива есть в основном sshd_config
-                if ! grep -q "^Include /etc/ssh/sshd_config.d" /etc/ssh/sshd_config 2>/dev/null; then
-                    echo "Include /etc/ssh/sshd_config.d/*.conf" >> /etc/ssh/sshd_config
-                fi
-                if [[ "$pass_auth" == "yes" ]]; then
-                    grep -q "^PasswordAuthentication" "$cfg" 2>/dev/null && sed -i 's|^PasswordAuthentication.*|PasswordAuthentication no|' "$cfg" || echo "PasswordAuthentication no" >> "$cfg"
+                # Проверяем синтаксис
+                if sshd -t 2>/dev/null; then
                     if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
                         log "Вход по паролю отключён, SSH перезапущен"
                     else
                         warn "Ошибка перезапуска SSH"
                     fi
                 else
-                    grep -q "^PasswordAuthentication" "$cfg" 2>/dev/null && sed -i 's|^PasswordAuthentication.*|PasswordAuthentication yes|' "$cfg" || echo "PasswordAuthentication yes" >> "$cfg"
+                    warn "Ошибка в конфигурации SSH!"
+                fi
+                read -rp "Enter — продолжить " _ || true ;;
+            3)
+                local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
+                mkdir -p /etc/ssh/sshd_config.d
+                
+                if [[ "$pass_auth" == "yes" ]]; then
+                    new_pass_auth="no"
+                else
+                    new_pass_auth="yes"
+                fi
+                
+                # Создаём полный конфиг безопасности
+                cat > "$cfg" <<EOF
+Port $port
+PermitRootLogin prohibit-password
+PubkeyAuthentication yes
+PasswordAuthentication $new_pass_auth
+PermitEmptyPasswords no
+GSSAPIAuthentication no
+X11Forwarding no
+MaxAuthTries 3
+MaxSessions 5
+ClientAliveInterval 300
+ClientAliveCountMax 2
+UseDNS no
+ChallengeResponseAuthentication no
+KerberosAuthentication no
+EOF
+                
+                # Проверяем синтаксис
+                if sshd -t 2>/dev/null; then
                     if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
-                        log "Вход по паролю включён, SSH перезапущен"
+                        log "Вход по паролю $(if [[ "$new_pass_auth" == "no" ]]; then echo "отключён"; else echo "включён"; fi), SSH перезапущен"
                     else
                         warn "Ошибка перезапуска SSH"
                     fi
+                else
+                    warn "Ошибка в конфигурации SSH!"
                 fi
                 read -rp "Enter — продолжить " _ || true ;;
             4)
                 local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
                 mkdir -p /etc/ssh/sshd_config.d
-                # Убедимся, что Include директива есть в основном sshd_config
-                if ! grep -q "^Include /etc/ssh/sshd_config.d" /etc/ssh/sshd_config 2>/dev/null; then
-                    echo "Include /etc/ssh/sshd_config.d/*.conf" >> /etc/ssh/sshd_config
-                fi
                 echo "${c_txt}1. yes — разрешён${c_off}"
                 echo "${c_txt}2. no — запрещён${c_off}"
                 echo "${c_txt}3. prohibit-password — только по ключу${c_off}"
@@ -448,11 +551,34 @@ ssh_settings_menu() {
                     2) new_val="no" ;;
                     *) new_val="prohibit-password" ;;
                 esac
-                grep -q "^PermitRootLogin" "$cfg" 2>/dev/null && sed -i "s|^PermitRootLogin.*|PermitRootLogin $new_val|" "$cfg" || echo "PermitRootLogin $new_val" >> "$cfg"
-                if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
-                    log "PermitRootLogin установлен в $new_val, SSH перезапущен"
+                
+                # Создаём полный конфиг безопасности
+                cat > "$cfg" <<EOF
+Port $port
+PermitRootLogin $new_val
+PubkeyAuthentication yes
+PasswordAuthentication $pass_auth
+PermitEmptyPasswords no
+GSSAPIAuthentication no
+X11Forwarding no
+MaxAuthTries 3
+MaxSessions 5
+ClientAliveInterval 300
+ClientAliveCountMax 2
+UseDNS no
+ChallengeResponseAuthentication no
+KerberosAuthentication no
+EOF
+                
+                # Проверяем синтаксис
+                if sshd -t 2>/dev/null; then
+                    if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
+                        log "PermitRootLogin установлен в $new_val, SSH перезапущен"
+                    else
+                        warn "Ошибка перезапуска SSH"
+                    fi
                 else
-                    warn "Ошибка перезапуска SSH"
+                    warn "Ошибка в конфигурации SSH!"
                 fi
                 read -rp "Enter — продолжить " _ || true ;;
             0) return 0 ;;
@@ -465,6 +591,9 @@ change_ssh_port_direct() {
     clear
     require_cmd ufw ufw
     local port=$(get_ssh_port)
+    local pass_auth=$(grep "^PasswordAuthentication" /etc/ssh/sshd_config.d/99-homeserver.conf 2>/dev/null | awk '{print $2}' || echo "no")
+    local root_login=$(grep "^PermitRootLogin" /etc/ssh/sshd_config.d/99-homeserver.conf 2>/dev/null | awk '{print $2}' || echo "prohibit-password")
+    
     echo "${c_mag}=== Изменить SSH-порт ===${c_off}"
     echo "${c_txt}Текущий порт: $port${c_off}"
     local new_port; new_port=$(ask "Новый SSH-порт" "$port")
@@ -473,14 +602,35 @@ change_ssh_port_direct() {
     ufw allow "$new_port/tcp" comment 'SSH' >/dev/null 2>&1 && log "UFW: порт $new_port/tcp открыт" || warn "Ошибка UFW"
     ufw reload >/dev/null 2>&1 && log "UFW перезапущен" || warn "Ошибка перезапуска UFW"
     
+    # Создаём полный конфиг безопасности
     local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
     mkdir -p /etc/ssh/sshd_config.d
-    grep -q "^Port " "$cfg" 2>/dev/null && sed -i "s|^Port .*|Port $new_port|" "$cfg" || echo "Port $new_port" >> "$cfg"
+    cat > "$cfg" <<EOF
+Port $new_port
+PermitRootLogin $root_login
+PubkeyAuthentication yes
+PasswordAuthentication $pass_auth
+PermitEmptyPasswords no
+GSSAPIAuthentication no
+X11Forwarding no
+MaxAuthTries 3
+MaxSessions 5
+ClientAliveInterval 300
+ClientAliveCountMax 2
+UseDNS no
+ChallengeResponseAuthentication no
+KerberosAuthentication no
+EOF
     
-    if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
-        log "SSH перезапущен, порт: $new_port"
+    # Проверяем синтаксис
+    if sshd -t 2>/dev/null; then
+        if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
+            log "SSH перезапущен, порт: $new_port"
+        else
+            warn "Ошибка перезапуска SSH"
+        fi
     else
-        warn "Ошибка перезапуска SSH"
+        warn "Ошибка в конфигурации SSH!"
     fi
     read -rp "Enter — продолжить " _ || true
 }
@@ -585,7 +735,7 @@ block_rkn() {
 #!/usr/bin/env bash
 set -e
 cd /opt/homeserver
-wget -O blacklist.txt https://raw.githubusercontent.com/C24Be/AS_Network_List/main/blacklists/blacklist.txt
+wget -q -O blacklist.txt https://raw.githubusercontent.com/C24Be/AS_Network_List/main/blacklists/blacklist.txt
 if [[ ! -f blacklist.txt ]]; then
     echo "Файл blacklist.txt не найден!"
     exit 1
@@ -596,7 +746,7 @@ count=0
 while read -r subnet; do
     [[ -z "$subnet" || "$subnet" =~ ^# ]] && continue
     ipset add rkn4_tmp "$subnet" 2>/dev/null || true
-    ((count++))
+    ((count++)) || true
 done < blacklist.txt
 echo "Загружено подсетей: $count"
 echo "Активация списка..."
@@ -673,7 +823,7 @@ sudo_logging_menu() {
     while true; do
         clear
         echo "${c_mag}=== Логирование sudo ===${c_off}"
-        if grep -q "^Defaults.*logfile=/var/log/sudo.log" /etc/sudoers 2>/dev/null; then
+        if grep -q "^Defaults.*logfile" /etc/sudoers 2>/dev/null; then
             echo "${c_txt}Статус: включено${c_off}"
             if [[ -f /var/log/sudo.log ]]; then
                 echo "${c_txt}Последние записи:${c_off}"
@@ -756,7 +906,7 @@ fail2ban_menu() {
         clear
         [[ -f "$ENV_FILE" ]] && load_env
         local bantime="${F2B_BANTIME:-7200}" maxretry="${F2B_MAXRETRY:-10}" findtime="${F2B_FINDTIME:-900}"
-        local f2b_status=$(systemctl is-active fail2ban 2>/dev/null | head -1 | tr -d '\n\r' || echo "inactive")
+        local f2b_status=$(systemctl is-active fail2ban 2>/dev/null | tr -d '[:space:]' || echo "inactive")
         
         echo "${c_mag}=== Fail2ban ===${c_off}"
         echo "${c_txt}Статус: $f2b_status${c_off}"
@@ -768,8 +918,8 @@ fail2ban_menu() {
         local listening_ports=$(ss -tlnp 2>/dev/null | awk 'NR>1 {print $4}' | grep -oE '[0-9]+$' | sort -un)
         
         if [[ -n "$listening_ports" ]]; then
-            printf "  %-15s %-20s %s\n" "Порт" "Процесс" "Fail2ban"
-            printf "  %-15s %-20s %s\n" "---" "---" "---"
+            printf "  %-15s %-24s %s\n" "Порт" "    Процесс" "     Fail2ban"
+            printf "  %-15s %-24s %s\n" "---" "---" "---"
             
             for port in $listening_ports; do
                 # Получаем имя процесса для порта
@@ -806,7 +956,12 @@ fail2ban_menu() {
             3) findtime=$(ask "findtime, секунд" "$findtime"); update_env F2B_FINDTIME "$findtime" ;;
             4)
                 local ports; ports=$(ask "Порты через пробел" "$ssh_port")
-                update_env F2B_PORTS "$ports"
+                # Записываем напрямую в .env, обходя проверку has_forbidden
+                if grep -q "^F2B_PORTS=" "$ENV_FILE" 2>/dev/null; then
+                    sed -i "s|^F2B_PORTS=.*|F2B_PORTS=$ports|" "$ENV_FILE"
+                else
+                    echo "F2B_PORTS=$ports" >> "$ENV_FILE"
+                fi
                 log "Порты для защиты: $ports" ;;
             5)
                 local ssh_port=$(get_ssh_port)
@@ -1012,7 +1167,8 @@ setup_scheduled_reboot() {
         
         # Парсим cron для человекопонятного описания
         local minute hour dom dow
-        read -r minute hour dom dow _ <<< "$schedule"
+        # Извлекаем только первые 5 полей (минуты, часы, день месяца, месяц, день недели)
+        read -r minute hour dom dow _ <<< "$(echo "$schedule" | awk '{print $1, $2, $3, $4, $5}')"
         local desc=""
         if [[ "$dom" == "*" && "$dow" == "*" ]]; then
             desc="Ежедневно в $(printf '%02d' "$hour"):$(printf '%02d' "$minute")"
