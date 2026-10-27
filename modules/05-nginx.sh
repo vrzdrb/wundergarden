@@ -52,7 +52,6 @@ dns_hint() {
 front_nginx_menu() {
     while true; do
         clear
-        clear
         cat <<SUM
 
  --- nginx и сертификаты ---
@@ -75,11 +74,26 @@ SUM
 
 certs_menu() {
     log "=== Сертификаты (acme.sh, wildcard через DNS-01) ==="
+    
+    # Загружаем .env если есть
+    [[ -f "$ENV_FILE" ]] && load_env
+    
+    # Проверяем наличие EMAIL, если нет - запрашиваем
+    if [[ -z "${EMAIL:-}" ]]; then
+        local domain="${DOMAIN:-}"
+        if [[ -z "$domain" ]]; then
+            domain=$(ask "Ваш домен" "")
+            [[ -n "$domain" ]] && update_env DOMAIN "$domain"
+        fi
+        EMAIL=$(ask "Email для Let's Encrypt" "admin@$domain")
+        update_env EMAIL "$EMAIL"
+    fi
+    
     if [[ ! -x "$HOME/.acme.sh/acme.sh" ]]; then
         ask_yn "Установить acme.sh?" || return 0
         curl -fsSL https://get.acme.sh | sh -s email="$EMAIL" || die "установка acme.sh не удалась"
     fi
-    load_env
+    
     local prov="${ACME_DNS_PROVIDER:-dns_cf}"
     echo "${c_txt}DNS-провайдер acme.sh (код модуля): dns_cf (Cloudflare), dns_selectel, dns_desec, dns_hetzner,${c_off}"
     echo "${c_txt}  dns_yandex, dns_regru... Полный список: https://github.com/acmesh-official/acme.sh/wiki/dnsapi${c_off}"
