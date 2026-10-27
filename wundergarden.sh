@@ -730,6 +730,8 @@ ABEOF
     if "$script"; then
         printf '@reboot root /opt/homeserver/abuse-block.sh\n17 4 * * * root /opt/homeserver/abuse-block.sh\n' > "$cron"
         log "Применён"
+        require_cmd ufw ufw
+        ufw reload >/dev/null 2>&1 && log "UFW перезапущен"
     else
         rm -f "$script"
         warn "Ошибка применения"
@@ -791,6 +793,9 @@ EOF
     else
         warn "Задание уже существует в crontab"
     fi
+    
+    require_cmd ufw ufw
+    ufw reload >/dev/null 2>&1 && log "UFW перезапущен"
     
     log "Блокировка РКН через ipset завершена!"
     read -rp "Enter — продолжить " _ || true
@@ -1086,6 +1091,187 @@ EOF
     done
 }
 
+setup_dns_netplan() {
+    clear
+    echo "${c_mag}=== Настройка DNS (netplan + systemd-resolved) ===${c_off}"
+    
+    # Проверка зависимостей
+    require_cmd python3 python3
+    require_cmd netplan netplan.io
+    
+    if ! python3 -c 'import yaml' 2>/dev/null; then
+        warn "Нужен python3-yaml"
+        apt-get install -y python3-yaml
+    fi
+    
+    if ! systemctl list-unit-files systemd-resolved.service >/dev/null 2>&1; then
+        die "systemd-resolved не найден"
+    fi
+    
+    local NETPLAN_FILE="/etc/netplan/50-cloud-init.yaml"
+    [[ -f "$NETPLAN_FILE" ]] || { warn "Не найден $NETPLAN_FILE"; return 1; }
+    
+    local DNS_SERVERS=(1.1.1.1 9.9.9.9 8.8.8.8)
+    local SEARCH_DOMAINS=(netgrid.host)
+    local RESOLVED_DROPIN_DIR="/etc/systemd/resolved.conf.d"
+    local RESOLVED_DROPIN="${RESOLVED_DROPIN_DIR}/10-dns.conf"
+    local CLOUD_INIT_NET_DISABLE="/etc/cloud/cloud.cfg.d/99-disable-network-config.cfg"
+    local RESOLV_TARGET="/run/systemd/resolve/resolv.conf"
+    local BACKUP_DIR="/root/dns-backup-$(date +%Y%m%d-%H%M%S)"
+    local BACKUP_DONE=0
+    local NETPLAN_CHANGED=0
+    local RESOLVED_CHANGED=0
+    
+    # Бэкап создаётся лениво: только перед первым реальным изменением
+    backup() {
+        if [[ $BACKUP_DONE -eq 1 ]]; then return 0; fi
+        log "Бэкап в $BACKUP_DIR"
+        mkdir -p "$BACKUP_DIR"
+        cp -a /etc/netplan "$BACKUP_DIR/netplan"
+        if [[ -e /etc/resolv.conf || -L /etc/resolv.conf ]]; then
+            cp -a /etc/resolv.conf "$BACKUP_DIR/resolv.conf"
+        fi
+        if [[ -d "$RESOLVED_DROPIN_DIR" ]]; then
+            cp -a "$RESOLVED_DROPIN_DIR" "$BACKUP_DIR/resolved.conf.d"
+        fi
+        if [[ -f "$CLOUD_INIT_NET_DISABLE" ]]; then
+            cp -a "$CLOUD_INIT_NET_DISABLE" "$BACKUP_DIR/99-disable-network-config.cfg"
+        fi
+        BACKUP_DONE=1
+    }
+    
+    # --- 1. systemd-resolved drop-in ---
+    local DROPIN_CONTENT="[Resolve]
+DNS=${DNS_SERVERS[*]}
+LLMNR=no
+MulticastDNS=no"
+    
+    if [[ -f "$RESOLVED_DROPIN" && "$(cat "$RESOLVED_DROPIN")" == "$DROPIN_CONTENT" ]]; then
+        skip "$RESOLVED_DROPIN без изменений"
+    else
+        backup
+        log "Пишу $RESOLVED_DROPIN"
+        mkdir -p "$RESOLVED_DROPIN_DIR"
+        printf '%s\n' "$DROPIN_CONTENT" > "$RESOLVED_DROPIN"
+        chmod 644 "$RESOLVED_DROPIN"
+        RESOLVED_CHANGED=1
+    fi
+    
+    # --- 2. netplan: nameservers.addresses + search ---
+    local TMP_NETPLAN="$(mktemp)"
+    
+    local RESULT=$(python3 - "$NETPLAN_FILE" "$TMP_NETPLAN" "${DNS_SERVERS[*]}" "${SEARCH_DOMAINS[*]}" <<'PY'
+import sys, copy, yaml
+path, out, dns, search = sys.argv[1], sys.argv[2], sys.argv[3].split(), sys.argv[4].split()
+
+with open(path) as f:
+    data = yaml.safe_load(f)
+orig = copy.deepcopy(data)
+
+net = data.setdefault("network", {})
+for section in ("ethernets", "bonds", "bridges", "vlans"):
+    for name, cfg in (net.get(section) or {}).items():
+        if not isinstance(cfg, dict):
+            continue
+        if "nameservers" in cfg or "addresses" in cfg:
+            ns = cfg.get("nameservers")
+            if not isinstance(ns, dict):
+                ns = {}
+            cfg["nameservers"] = ns
+            ns["addresses"] = list(dns)
+            cur = ns.get("search") or []
+            if isinstance(cur, str):
+                cur = [cur]
+            merged = list(cur) + [d for d in search if d not in cur]
+            if merged:
+                ns["search"] = merged
+
+if data == orig:
+    print("UNCHANGED")
+else:
+    with open(out, "w") as f:
+        yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    print("CHANGED")
+PY
+)
+    
+    if [[ "$RESULT" == "CHANGED" ]]; then
+        backup
+        log "Обновляю $NETPLAN_FILE"
+        local MODE=$(stat -c '%a' "$NETPLAN_FILE")
+        cp "$TMP_NETPLAN" "$NETPLAN_FILE"
+        chmod "$MODE" "$NETPLAN_FILE"
+        NETPLAN_CHANGED=1
+    else
+        skip "$NETPLAN_FILE без изменений"
+    fi
+    chmod 600 /etc/netplan/*.yaml 2>/dev/null || true
+    rm -f "$TMP_NETPLAN"
+    
+    # --- 3. cloud-init: не перезаписывать сетевой конфиг ---
+    local CI_CONTENT="network: {config: disabled}"
+    if [[ -d /etc/cloud/cloud.cfg.d ]]; then
+        if [[ -f "$CLOUD_INIT_NET_DISABLE" && "$(cat "$CLOUD_INIT_NET_DISABLE")" == "$CI_CONTENT" ]]; then
+            skip "cloud-init уже не управляет сетью"
+        else
+            backup
+            log "Отключаю управление сетью в cloud-init"
+            printf '%s\n' "$CI_CONTENT" > "$CLOUD_INIT_NET_DISABLE"
+        fi
+    fi
+    
+    # --- 4. /etc/resolv.conf -> resolv.conf с реальными upstream-серверами ---
+    if [[ -L /etc/resolv.conf && "$(readlink /etc/resolv.conf)" == "$RESOLV_TARGET" ]]; then
+        skip "/etc/resolv.conf уже указывает на $RESOLV_TARGET"
+    else
+        backup
+        log "Настраиваю /etc/resolv.conf"
+        ln -sfn "$RESOLV_TARGET" /etc/resolv.conf
+        RESOLVED_CHANGED=1
+    fi
+    
+    # --- 5. Применение (только при изменениях) ---
+    if [[ $NETPLAN_CHANGED -eq 1 ]]; then
+        log "netplan generate"
+        if ! netplan generate; then
+            cp -a "$BACKUP_DIR/netplan/." /etc/netplan/
+            warn "netplan generate не прошёл, netplan-файлы восстановлены из $BACKUP_DIR"
+            return 1
+        fi
+        log "netplan apply"
+        netplan apply
+        RESOLVED_CHANGED=1
+    fi
+    
+    if [[ $RESOLVED_CHANGED -eq 1 ]]; then
+        log "Перезапуск systemd-resolved"
+        systemctl enable systemd-resolved >/dev/null 2>&1 || true
+        systemctl restart systemd-resolved
+        sleep 2
+    else
+        skip "Применение не требуется"
+    fi
+    
+    # --- 6. Проверка ---
+    echo ""
+    echo "${c_txt}===== netplan: nameservers =====${c_off}"
+    grep -A8 'nameservers:' "$NETPLAN_FILE" || true
+    echo ""
+    echo "${c_txt}===== /etc/resolv.conf (без комментариев) =====${c_off}"
+    grep -v '^#' /etc/resolv.conf | sed '/^$/d'
+    echo ""
+    echo "${c_txt}===== resolvectl status =====${c_off}"
+    resolvectl status | grep -E 'Global|Link|Protocols|DNS Servers|DNS Domain' || true
+    echo ""
+    echo "${c_txt}===== Порты 5353/5355 (должно быть пусто) =====${c_off}"
+    ss -tulpn | grep -E ':(5353|5355)\b' || echo "OK: LLMNR/mDNS не слушают"
+    echo ""
+    echo "${c_txt}===== Тест резолва =====${c_off}"
+    resolvectl query debian.org || true
+    
+    [[ $BACKUP_DONE -eq 1 ]] && log "Бэкап: $BACKUP_DIR" || true
+}
+
 setup_network_bbr_ipv6_dns() {
     while true; do
         clear
@@ -1121,70 +1307,7 @@ setup_network_bbr_ipv6_dns() {
                 fi
                 read -rp "Enter — продолжить " _ || true ;;
             3)
-                if [[ -f /etc/systemd/resolved.conf.d/99-homeserver.conf ]]; then
-                    log "DNS уже настроен (DoT включён)"
-                    read -rp "Enter — продолжить " _ || true
-                    continue
-                fi
-                require_cmd resolvectl systemd
-                
-                echo "${c_txt}Настройка DNS с DoT (DNS-over-TLS)...${c_off}"
-                
-                # Удаляем resolv.conf и создаём симлинк на stub-resolv.conf
-                rm -f /etc/resolv.conf
-                ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
-                log "Создан симлинк /etc/resolv.conf -> stub-resolv.conf"
-                
-                # Настраиваем systemd-resolved с Cloudflare и Quad9 DoT
-                mkdir -p /etc/systemd/resolved.conf.d
-                cat > /etc/systemd/resolved.conf.d/99-homeserver.conf <<'EOF'
-[Resolve]
-# Используем Cloudflare и Quad9.
-# Формат IP#SNI необходим для корректной проверки TLS-сертификата.
-DNS=1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com
-DNS=9.9.9.9#dns.quad9.net 149.112.112.112#dns.quad9.net
-
-# Включаем строгий DoT (true) или оппортунистический (opportunistic).
-# true предпочтительнее: если DoT недоступен, DNS просто не будет работать,
-# что лучше, чем тихий откат на plaintext.
-DNSOverTLS=true
-
-# Отключаем опасный и ненужный LLMNR и mDNS
-LLMNR=no
-MulticastDNS=no
-
-# Включаем кэширование
-Cache=yes
-
-# Включаем DNSSEC (защита от подмены ответов)
-DNSSEC=allow-downgrade
-EOF
-                log "Настроен systemd-resolved с Cloudflare и Quad9 DoT"
-                
-                # Делаем resolv.conf неизменяемым
-                chattr +i /etc/resolv.conf 2>/dev/null && log "Файл /etc/resolv.conf сделан неизменяемым" || warn "Не удалось сделать файл неизменяемым"
-                
-                # Перезапускаем systemd-resolved
-                systemctl restart systemd-resolved
-                log "systemd-resolved перезапущен"
-                
-                # Проверяем LLMNR порт 5355 и блокируем через ufw
-                if ss -uln | grep -q ":5355 "; then
-                    require_cmd ufw ufw
-                    ufw deny 5355/udp >/dev/null 2>&1 && log "UFW: порт 5355/udp заблокирован (LLMNR)"
-                    ufw deny 5355/tcp >/dev/null 2>&1 && log "UFW: порт 5355/tcp заблокирован (LLMNR)"
-                    ufw reload >/dev/null 2>&1 && log "UFW перезапущен"
-                else
-                    log "Порт 5355 (LLMNR) не слушается"
-                fi
-                
-                # Проверяем корректность настроек DNS
-                echo ""
-                echo "${c_txt}Проверка настроек DNS:${c_off}"
-                resolvectl status 2>/dev/null | head -20
-                echo ""
-                
-                log "DNS настроен с DoT (Cloudflare, Quad9)"
+                setup_dns_netplan
                 read -rp "Enter — продолжить " _ || true ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
