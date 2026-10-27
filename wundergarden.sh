@@ -82,7 +82,7 @@ _t() {
             SRV04) echo "SSH settings" ;;
             SRV05) echo "UFW settings" ;;
             SRV06) echo "Fail2ban" ;;
-            SRV07) echo "DNS settings" ;;
+            SRV07) echo "BBR, IPv6, DNS settings" ;;
             SRV08) echo "Swap" ;;
             SRV09) echo "Sudo logging" ;;
             SRV10) echo "Root mail" ;;
@@ -123,7 +123,7 @@ _t() {
         SRV04) echo "Настройки SSH" ;;
         SRV05) echo "Настройки UFW" ;;
         SRV06) echo "Fail2ban" ;;
-        SRV07) echo "Настроить DNS" ;;
+        SRV07) echo "Настройки BBR, IPv6, DNS" ;;
         SRV08) echo "Swap" ;;
         SRV09) echo "Логирование sudo" ;;
         SRV10) echo "Почта root" ;;
@@ -679,8 +679,8 @@ ufw_settings_menu() {
                 fi
                 read -rp "Enter — продолжить " _ || true ;;
             2) change_ssh_port_direct ;;
-            3) abuse_block_setup ;;
-            4) block_rkn ;;
+            3) abuse_block_setup || true ;;
+            4) block_rkn || true ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
         esac
@@ -714,17 +714,16 @@ abuse_block_setup() {
     esac
     cat > "$script" <<ABEOF
 #!/usr/bin/env bash
-set -e
 URL="$url"
 TMP="\$(mktemp)"
-curl -fsSL --max-time 300 "\$URL" -o "\$TMP"
-ipset create abuse4_tmp hash:net
-grep -E '^[0-9]' "\$TMP" | sed 's/^/add abuse4_tmp /' | ipset restore
+curl -fsSL --max-time 300 "\$URL" -o "\$TMP" || { echo "Ошибка загрузки"; exit 1; }
+ipset create abuse4_tmp hash:net 2>/dev/null || true
+grep -E '^[0-9]' "\$TMP" | sed 's/^/add abuse4_tmp /' | ipset restore 2>/dev/null || true
 ipset create abuse4 hash:net 2>/dev/null || true
-ipset swap abuse4_tmp abuse4
-ipset destroy abuse4_tmp
+ipset swap abuse4_tmp abuse4 2>/dev/null || true
+ipset destroy abuse4_tmp 2>/dev/null || true
 rm -f "\$TMP"
-iptables -C INPUT -m set --match-set abuse4 src -j DROP 2>/dev/null || iptables -I INPUT 1 -m set --match-set abuse4 src -j DROP
+iptables -C INPUT -m set --match-set abuse4 src -j DROP 2>/dev/null || iptables -I INPUT 1 -m set --match-set abuse4 src -j DROP 2>/dev/null || true
 iptables -C DOCKER-USER -m set --match-set abuse4 src -j DROP 2>/dev/null || iptables -I DOCKER-USER 1 -m set --match-set abuse4 src -j DROP 2>/dev/null || true
 ABEOF
     chmod +x "$script"
@@ -750,7 +749,6 @@ block_rkn() {
     local script="$CONFIG_ROOT/rkn-block.sh"
     cat > "$script" <<'EOF'
 #!/usr/bin/env bash
-set -e
 cd /opt/homeserver
 wget -q -O blacklist.txt https://raw.githubusercontent.com/C24Be/AS_Network_List/main/blacklists/blacklist.txt
 if [[ ! -f blacklist.txt ]]; then
@@ -783,7 +781,7 @@ EOF
         warn "Ошибка применения блокировки"
         rm -f "$script"
         read -rp "Enter — продолжить " _ || true
-        return
+        return 0
     fi
     
     # Добавляем в crontab для ежедневного обновления
@@ -813,7 +811,7 @@ swap_menu() {
         read -rp "Номер: " c || true
         case "$c" in
             1)
-                local g; g=$(ask "Размер swap, ГБ" "2")
+                local g; g=$(ask "Размер swap, ГБ" "1")
                 [[ "$g" =~ ^[0-9]+$ ]] || { warn "нужно число"; continue; }
                 if swapon --show=NAME --noheadings 2>/dev/null | grep -q /swapfile; then
                     swapoff /swapfile && sed -i '\|^/swapfile |d' /etc/fstab && rm -f /swapfile
@@ -941,9 +939,13 @@ fail2ban_menu() {
         fi
         
         echo "${c_mag}=== Fail2ban ===${c_off}"
-        # Показываем статус только если active
-        if [[ "$f2b_status" == "active" ]]; then
-            echo "${c_txt}Статус: active${c_off}"
+        # Показываем статус: настроен только если есть jail.local
+        if [[ -f "$jail_file" && "$f2b_status" == "active" ]]; then
+            echo "${c_txt}Статус: настроен и активен${c_off}"
+        elif [[ -f "$jail_file" ]]; then
+            echo "${c_txt}Статус: настроен, но не активен${c_off}"
+        else
+            echo "${c_txt}Статус: не настроен (выполните пункт 1)${c_off}"
         fi
         echo ""
         echo "${c_txt}Порты, используемые приложениями:${c_off}"
@@ -1087,7 +1089,7 @@ EOF
 setup_network_bbr_ipv6_dns() {
     while true; do
         clear
-        echo "${c_mag}=== Настроить DNS ===${c_off}"
+        echo "${c_mag}=== Настройки BBR, IPv6, DNS ===${c_off}"
         echo "${c_txt}BBR: $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '?')${c_off}"
         echo "${c_txt}IPv6: $([ -f /etc/sysctl.d/99-homeserver-ipv6.conf ] && echo 'отключён' || echo 'включён')${c_off}"
         echo "${c_txt}DNS: $([ -f /etc/systemd/resolved.conf.d/99-homeserver.conf ] && echo 'настроен' || echo 'не настроен')${c_off}"
@@ -1098,7 +1100,7 @@ setup_network_bbr_ipv6_dns() {
         echo ""
         echo "${c_txt}1. BBR${c_off}"
         echo "${c_txt}2. IPv6${c_off}"
-        echo "${c_txt}3. Настроить DNS${c_off}"
+        echo "${c_txt}3. Настройки DNS${c_off}"
         echo "${c_txt}0. Назад${c_off}"
         read -rp "Номер: " c || true
         case "$c" in
@@ -1125,18 +1127,64 @@ setup_network_bbr_ipv6_dns() {
                     continue
                 fi
                 require_cmd resolvectl systemd
-                mkdir -p /etc/systemd/resolved.conf.d
+                
+                echo "${c_txt}Настройка DNS с DoT (DNS-over-TLS)...${c_off}"
+                
+                # Удаляем resolv.conf и создаём симлинк на stub-resolv.conf
                 rm -f /etc/resolv.conf
-                # Cloudflare DoT, Quad9 DoT, Google DoT
-                cat > /etc/resolv.conf <<EOF
-nameserver 1.1.1.1
-nameserver 9.9.9.9
-nameserver 8.8.8.8
+                ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+                log "Создан симлинк /etc/resolv.conf -> stub-resolv.conf"
+                
+                # Настраиваем systemd-resolved с Cloudflare и Quad9 DoT
+                mkdir -p /etc/systemd/resolved.conf.d
+                cat > /etc/systemd/resolved.conf.d/99-homeserver.conf <<'EOF'
+[Resolve]
+# Используем Cloudflare и Quad9.
+# Формат IP#SNI необходим для корректной проверки TLS-сертификата.
+DNS=1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com
+DNS=9.9.9.9#dns.quad9.net 149.112.112.112#dns.quad9.net
+
+# Включаем строгий DoT (true) или оппортунистический (opportunistic).
+# true предпочтительнее: если DoT недоступен, DNS просто не будет работать,
+# что лучше, чем тихий откат на plaintext.
+DNSOverTLS=true
+
+# Отключаем опасный и ненужный LLMNR и mDNS
+LLMNR=no
+MulticastDNS=no
+
+# Включаем кэширование
+Cache=yes
+
+# Включаем DNSSEC (защита от подмены ответов)
+DNSSEC=allow-downgrade
 EOF
-                chmod 644 /etc/resolv.conf
-                printf '[Resolve]\nDNS=1.1.1.1#cloudflare-dns.com 9.9.9.9#dns.quad9.net 8.8.8.8#dns.google\nDNSOverTLS=opportunistic\nDomains=~.\n' > /etc/systemd/resolved.conf.d/99-homeserver.conf
+                log "Настроен systemd-resolved с Cloudflare и Quad9 DoT"
+                
+                # Делаем resolv.conf неизменяемым
+                chattr +i /etc/resolv.conf 2>/dev/null && log "Файл /etc/resolv.conf сделан неизменяемым" || warn "Не удалось сделать файл неизменяемым"
+                
+                # Перезапускаем systemd-resolved
                 systemctl restart systemd-resolved
-                log "DNS настроен (DoT: Cloudflare, Quad9, Google)"
+                log "systemd-resolved перезапущен"
+                
+                # Проверяем LLMNR порт 5355 и блокируем через ufw
+                if ss -uln | grep -q ":5355 "; then
+                    require_cmd ufw ufw
+                    ufw deny 5355/udp >/dev/null 2>&1 && log "UFW: порт 5355/udp заблокирован (LLMNR)"
+                    ufw deny 5355/tcp >/dev/null 2>&1 && log "UFW: порт 5355/tcp заблокирован (LLMNR)"
+                    ufw reload >/dev/null 2>&1 && log "UFW перезапущен"
+                else
+                    log "Порт 5355 (LLMNR) не слушается"
+                fi
+                
+                # Проверяем корректность настроек DNS
+                echo ""
+                echo "${c_txt}Проверка настроек DNS:${c_off}"
+                resolvectl status 2>/dev/null | head -20
+                echo ""
+                
+                log "DNS настроен с DoT (Cloudflare, Quad9)"
                 read -rp "Enter — продолжить " _ || true ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
@@ -1422,7 +1470,7 @@ server_menu() {
         local ufw_status=$(ufw status 2>/dev/null | head -1 | awk '{print $2}' || echo '?')
         local f2b_status="выкл"; systemctl is-active fail2ban >/dev/null 2>&1 && f2b_status="active"
         local swap_status=$(swapon --show=SIZE --noheadings 2>/dev/null | head -1 || echo "нет")
-        local sudo_log="выкл"; grep -q "^Defaults.*logfile=/var/log/sudo.log" /etc/sudoers 2>/dev/null && sudo_log="вкл"
+        local sudo_log="выкл"; grep -q "^Defaults.*logfile.*sudo.log" /etc/sudoers 2>/dev/null && sudo_log="вкл"
         local root_mail="не настроено"; command -v msmtp >/dev/null && grep -qs "account default" /etc/msmtprc 2>/dev/null && root_mail="настроено"
         local shell_hist="выключено"; [[ -f /etc/profile.d/99-homeserver-history.sh ]] && shell_hist="включено"
         local unattended="выкл"; dpkg -l unattended-upgrades 2>/dev/null | grep -q '^ii' && unattended="вкл"
