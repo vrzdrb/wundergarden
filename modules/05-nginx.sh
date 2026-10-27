@@ -78,14 +78,22 @@ certs_menu() {
     # Загружаем .env если есть
     [[ -f "$ENV_FILE" ]] && load_env
     
+    # Проверяем наличие DOMAIN, если нет - запрашиваем
+    if [[ -z "${DOMAIN:-}" ]]; then
+        local domain_input
+        domain_input=$(ask "Ваш домен (например: example.com)" "")
+        if [[ -n "$domain_input" ]]; then
+            export DOMAIN="$domain_input"
+            update_env DOMAIN "$domain_input"
+        else
+            die "Домен не указан - невозможно выпустить сертификат"
+        fi
+    fi
+    
     # Проверяем наличие EMAIL, если нет - запрашиваем
     if [[ -z "${EMAIL:-}" ]]; then
-        local domain="${DOMAIN:-}"
-        if [[ -z "$domain" ]]; then
-            domain=$(ask "Ваш домен" "")
-            [[ -n "$domain" ]] && update_env DOMAIN "$domain"
-        fi
-        EMAIL=$(ask "Email для Let's Encrypt" "admin@$domain")
+        EMAIL=$(ask "Email для Let's Encrypt" "admin@$DOMAIN")
+        export EMAIL
         update_env EMAIL "$EMAIL"
     fi
     
@@ -120,9 +128,26 @@ certs_menu() {
         --key-file "$CONFIG_ROOT/config/nginx/certs/privkey.pem" \
         --reloadcmd "cd $CONFIG_ROOT && docker compose exec -T nginx nginx -s reload" \
         && chmod 600 "$CONFIG_ROOT/config/nginx/certs/privkey.pem"
-    log "Сертификаты установлены в config/nginx/certs/."
-    log "Продление: acme.sh cron (автоматически), reload nginx встроен в --reloadcmd."
-    [[ -f "$ENV_FILE" ]] && update_env CERT_ISSUED "yes"
+    
+    log "Сертификаты успешно установлены!"
+    echo ""
+    echo "${c_txt}Пути к сертификатам:${c_off}"
+    echo "${c_txt}  Полный сертификат: $CONFIG_ROOT/config/nginx/certs/fullchain.pem${c_off}"
+    echo "${c_txt}  Приватный ключ:    $CONFIG_ROOT/config/nginx/certs/privkey.pem${c_off}"
+    echo ""
+    
+    # Проверяем существование файлов
+    if [[ -f "$CONFIG_ROOT/config/nginx/certs/fullchain.pem" && -f "$CONFIG_ROOT/config/nginx/certs/privkey.pem" ]]; then
+        log "✓ Оба файла сертификатов существуют"
+        log "Продление: acme.sh cron (автоматически), reload nginx встроен в --reloadcmd."
+        [[ -f "$ENV_FILE" ]] && update_env CERT_ISSUED "yes"
+    else
+        warn "Некоторые файлы сертификатов не найдены!"
+        [[ ! -f "$CONFIG_ROOT/config/nginx/certs/fullchain.pem" ]] && warn "  - Отсутствует: fullchain.pem"
+        [[ ! -f "$CONFIG_ROOT/config/nginx/certs/privkey.pem" ]] && warn "  - Отсутствует: privkey.pem"
+    fi
+    
+    read -rp "Enter — продолжить " _ || true
 }
 
 nginx_up() {
@@ -152,11 +177,10 @@ nginx_menu() {
 
 ${c_mag} --- nginx: $st ---${c_off}
   ${c_num}1.${c_off} ${c_txt}Запустить / перезапустить${c_off}
-  ${c_num}2.${c_off} ${c_txt}Stream-пасsthrough домены: ${STREAM_DOMAINS:-нет}${c_off}
+  ${c_num}2.${c_off} ${c_txt}Stream-passthrough домены: ${STREAM_DOMAINS:-нет}${c_off}
   ${c_num}3.${c_off} ${c_txt}Показать полный текущий конфиг${c_off}
   ${c_num}4.${c_off} ${c_txt}HSTS: $(onoff "${HSTS_ENABLED:-false}")${c_off}
-  Порты: 80, 443,
-         64738.
+  ${c_txt}Порты: 80, 443, 64738${c_off}
 
   ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM

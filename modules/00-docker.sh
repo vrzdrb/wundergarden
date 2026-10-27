@@ -596,6 +596,10 @@ networks:
   net-quiz:
   net-survey:
 
+volumes:
+  netdata-lib:
+  netdata-cache:
+
 COMPOSE_EOF
 }
 
@@ -634,6 +638,8 @@ HSTS_ENABLED=false
 STREAM_DOMAINS=
 TURN_PASSWORD=$(gen_pass)
 PUBLIC_IP=
+DOMAIN=
+EMAIL=
 MATRIX_IMAGE=ghcr.io/continuwuity/continuwuity:latest
 LUANTI_IMAGE=linuxserver/minetest:latest
 LUANTI_WORLDS=$CONFIG_ROOT/data/luanti/worlds
@@ -665,6 +671,7 @@ SYNCTHING_GUI_BIND=127.0.0.1:8384
 SYNCTHING_SYNC_DIR=$CONFIG_ROOT/data/syncthing/sync
 SYNCTHING_RESCAN=3600
 EXCALIDRAW_STORAGE=$CONFIG_ROOT/data/excalidraw
+SUB_EXCALIDRAW=
 ETHERPAD_DB_PASSWORD=$(gen_pass)
 ETHERPAD_DB_ROOT_PASSWORD=$(gen_pass)
 MUMBLE_SUPERUSER_PASSWORD=$(gen_pass)
@@ -677,14 +684,18 @@ CLASSQUIZ_DB_PASSWORD=$(gen_pass)
 CLASSQUIZ_SKIP_EMAIL=True
 CLASSQUIZ_MEILI_MEM=256m
 CLASSQUIZ_UPLOADS=$CONFIG_ROOT/data/classquiz
+SUB_CLASSQUIZ=
 LIMESURVEY_DB_TYPE=mysql
 LIMESURVEY_DB_IMAGE=mariadb:11
 LIMESURVEY_DB_PORT=3306
 LIMESURVEY_DB_PASSWORD=$(gen_pass)
 LIMESURVEY_DB_ROOT_PASSWORD=$(gen_pass)
 LIMESURVEY_ADMIN_PASSWORD=$(gen_pass)
+SUB_LIMESURVEY=
 SEARXNG_SECRET=$(gen_pass)
 SEARCH_PW=
+SUB_GITEA=
+GITEA_DB_PASSWORD=$(gen_pass)
 EOF
         chmod 600 "$ENV_FILE"
         log "Конфигурация создана"
