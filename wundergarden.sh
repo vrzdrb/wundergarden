@@ -373,6 +373,21 @@ ssh_settings_menu() {
         fi
     fi
     
+    # Убеждаемся, что Include директива есть в sshd_config
+    if [[ -f "$SSHD_CONFIG" ]]; then
+        if ! grep -q "^Include /etc/ssh/sshd_config.d" "$SSHD_CONFIG"; then
+            # Добавляем Include в начало файла (после комментариев)
+            local temp_file=$(mktemp)
+            awk '
+                /^#/ { print; next }
+                !printed { print "Include /etc/ssh/sshd_config.d/*.conf"; print ""; printed=1 }
+                { print }
+            ' "$SSHD_CONFIG" > "$temp_file"
+            mv "$temp_file" "$SSHD_CONFIG"
+            log "Добавлена директива Include в sshd_config"
+        fi
+    fi
+    
     while true; do
         clear
         local port=$(get_ssh_port)
@@ -388,6 +403,7 @@ ssh_settings_menu() {
         echo "${c_txt}2. Добавить SSH-ключ${c_off}"
         echo "${c_txt}3. Вход по паролю: $pass_auth${c_off}"
         echo "${c_txt}4. Вход root: $root_login${c_off}"
+        echo "${c_txt}5. Проверить и исправить права на ключи${c_off}"
         echo "${c_txt}0. Назад${c_off}"
         read -rp "Номер: " c || true
         case "$c" in
@@ -435,43 +451,34 @@ ssh_settings_menu() {
                 local username; username=$(ask "Имя пользователя" "")
                 [[ -z "$username" ]] && continue
                 id "$username" >/dev/null 2>&1 || { warn "пользователь не найден"; continue; }
-                local IP; IP="$(curl -fsS --max-time 5 ifconfig.me 2>/dev/null || echo '<IP>')"
-                local port=$(get_ssh_port)
-                echo "${c_mag}=======================================================================================${c_off}"
-                echo "${c_mag}Создайте ключ на своём компьютере:${c_off}"
-                echo "${c_txt}ssh-keygen -t ed25519${c_off}"
-                echo ""
-                echo "${c_mag}Загрузите ключ на сервер (Linux):${c_off}"
-                echo "${c_txt}ssh-copy-id -i ~/.ssh/имяключа.pub -p $port $username@$IP${c_off}"
-                echo ""
-                echo "${c_mag}Команда для Windows:${c_off}"
-                echo "${c_txt}type %USERPROFILE%\\.ssh\\имяключа.pub | ssh -p $port $username@$IP \"cat >> ~/.ssh/authorized_keys\"${c_off}"
-                echo ""
-                echo "${c_mag}Проверьте вход ключом:${c_off}"
-                echo "${c_txt}ssh -i ~/.ssh/имяключа -p $port $username@$IP${c_off}"
-                echo ""
-                echo "${c_mag}ТОЛЬКО ЕСЛИ ВХОД УСПЕШЕН, нажмите Enter для отключения пароля${c_off}"
-                echo "${c_mag}=======================================================================================${c_off}"
-                read -r
                 
-                # Отключаем вход по паролю
+                # Получаем домашнюю директорию пользователя
+                local user_home=$(getent passwd "$username" | cut -d: -f6)
+                
+                # Создаём директорию .ssh с правильными правами
+                mkdir -p "$user_home/.ssh"
+                chmod 700 "$user_home/.ssh"
+                touch "$user_home/.ssh/authorized_keys"
+                chmod 600 "$user_home/.ssh/authorized_keys"
+                chown -R "$username:$username" "$user_home/.ssh"
+                log "Создана директория $user_home/.ssh с правильными правами"
+                
+                # Убеждаемся, что PubkeyAuthentication включён
                 local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
                 mkdir -p /etc/ssh/sshd_config.d
                 
                 if [[ -f "$cfg" ]]; then
-                    # Конфиг существует - обновляем только PasswordAuthentication
-                    if grep -q "^PasswordAuthentication" "$cfg" 2>/dev/null; then
-                        sed -i 's|^PasswordAuthentication .*|PasswordAuthentication no|' "$cfg"
-                    else
-                        echo "PasswordAuthentication no" >> "$cfg"
+                    if ! grep -q "^PubkeyAuthentication" "$cfg" 2>/dev/null; then
+                        echo "PubkeyAuthentication yes" >> "$cfg"
                     fi
                 else
-                    # Конфига нет - создаём полный конфиг безопасности
+                    # Создаём базовый конфиг с включённой аутентификацией по ключу
+                    local port=$(get_ssh_port)
                     cat > "$cfg" <<EOF
 Port $port
 PermitRootLogin prohibit-password
 PubkeyAuthentication yes
-PasswordAuthentication no
+PasswordAuthentication yes
 PermitEmptyPasswords no
 GSSAPIAuthentication no
 X11Forwarding no
@@ -485,16 +492,37 @@ KerberosAuthentication no
 EOF
                 fi
                 
-                # Проверяем синтаксис
+                # Перезапускаем SSH для применения настроек
                 if sshd -t 2>/dev/null; then
                     if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
-                        log "Вход по паролю отключён, SSH перезапущен"
+                        log "SSH перезапущен, аутентификация по ключу включена"
                     else
                         warn "Ошибка перезапуска SSH"
                     fi
                 else
                     warn "Ошибка в конфигурации SSH!"
+                    read -rp "Enter — продолжить " _ || true
+                    continue
                 fi
+                
+                local IP; IP="$(curl -fsS --max-time 5 ifconfig.me 2>/dev/null || echo '<IP>')"
+                local port=$(get_ssh_port)
+                echo "${c_mag}=======================================================================================${c_off}"
+                echo "${c_mag}Создайте ключ на своём компьютере:${c_off}"
+                echo "${c_txt}ssh-keygen -t ed25519${c_off}"
+                echo ""
+                echo "${c_mag}Загрузите ключ на сервер (Linux):${c_off}"
+                echo "${c_txt}ssh-copy-id -i ~/.ssh/имяключа.pub -p $port $username@$IP${c_off}"
+                echo ""
+                echo "${c_mag}Команда для Windows (PowerShell):${c_off}"
+                echo "${c_txt}type \$env:USERPROFILE\\.ssh\\имяключа.pub | ssh -p $port $username@$IP \"cat >> ~/.ssh/authorized_keys\"${c_off}"
+                echo ""
+                echo "${c_mag}Проверьте вход ключом:${c_off}"
+                echo "${c_txt}ssh -i ~/.ssh/имяключа -p $port $username@$IP${c_off}"
+                echo ""
+                echo "${c_mag}ВАЖНО: После успешного входа ключом вернитесь в меню и выберите${c_off}"
+                echo "${c_mag}пункт 3 'Вход по паролю' для отключения входа по паролю.${c_off}"
+                echo "${c_mag}=======================================================================================${c_off}"
                 read -rp "Enter — продолжить " _ || true ;;
             3)
                 local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
@@ -596,6 +624,91 @@ EOF
                 else
                     warn "Ошибка в конфигурации SSH!"
                 fi
+                read -rp "Enter — продолжить " _ || true ;;
+            5)
+                echo "${c_mag}=== Проверка и исправление прав на SSH-ключи ===${c_off}"
+                echo ""
+                
+                # Получаем список пользователей с UID >= 1000
+                local users=$(awk -F: '$3 >= 1000 && $3 < 65000 {print $1":"$6}' /etc/passwd)
+                
+                if [[ -z "$users" ]]; then
+                    warn "Не найдено пользователей с UID >= 1000"
+                    read -rp "Enter — продолжить " _ || true
+                    continue
+                fi
+                
+                local fixed_count=0
+                
+                while IFS=: read -r username user_home; do
+                    echo "${c_txt}Проверка пользователя: $username${c_off}"
+                    
+                    # Проверяем наличие .ssh директории
+                    if [[ ! -d "$user_home/.ssh" ]]; then
+                        echo "  ${c_txt}⚠ Директория .ssh отсутствует${c_off}"
+                        continue
+                    fi
+                    
+                    # Проверяем права на .ssh
+                    local ssh_perms=$(stat -c "%a" "$user_home/.ssh" 2>/dev/null)
+                    if [[ "$ssh_perms" != "700" ]]; then
+                        echo "  ${c_txt}⚠ Неправильные права на .ssh: $ssh_perms (должно быть 700)${c_off}"
+                        chmod 700 "$user_home/.ssh"
+                        echo "  ${c_txt}✓ Исправлено на 700${c_off}"
+                        ((fixed_count++))
+                    else
+                        echo "  ${c_txt}✓ Права на .ssh корректны (700)${c_off}"
+                    fi
+                    
+                    # Проверяем владельца .ssh
+                    local ssh_owner=$(stat -c "%U:%G" "$user_home/.ssh" 2>/dev/null)
+                    if [[ "$ssh_owner" != "$username:$username" ]]; then
+                        echo "  ${c_txt}⚠ Неправильный владелец .ssh: $ssh_owner (должно быть $username:$username)${c_off}"
+                        chown -R "$username:$username" "$user_home/.ssh"
+                        echo "  ${c_txt}✓ Владелец исправлен${c_off}"
+                        ((fixed_count++))
+                    else
+                        echo "  ${c_txt}✓ Владелец .ssh корректен${c_off}"
+                    fi
+                    
+                    # Проверяем authorized_keys
+                    if [[ -f "$user_home/.ssh/authorized_keys" ]]; then
+                        local key_perms=$(stat -c "%a" "$user_home/.ssh/authorized_keys" 2>/dev/null)
+                        if [[ "$key_perms" != "600" ]]; then
+                            echo "  ${c_txt}⚠ Неправильные права на authorized_keys: $key_perms (должно быть 600)${c_off}"
+                            chmod 600 "$user_home/.ssh/authorized_keys"
+                            echo "  ${c_txt}✓ Исправлено на 600${c_off}"
+                            ((fixed_count++))
+                        else
+                            echo "  ${c_txt}✓ Права на authorized_keys корректны (600)${c_off}"
+                        fi
+                        
+                        local key_owner=$(stat -c "%U:%G" "$user_home/.ssh/authorized_keys" 2>/dev/null)
+                        if [[ "$key_owner" != "$username:$username" ]]; then
+                            echo "  ${c_txt}⚠ Неправильный владелец authorized_keys: $key_owner${c_off}"
+                            chown "$username:$username" "$user_home/.ssh/authorized_keys"
+                            echo "  ${c_txt}✓ Владелец исправлен${c_off}"
+                            ((fixed_count++))
+                        else
+                            echo "  ${c_txt}✓ Владелец authorized_keys корректен${c_off}"
+                        fi
+                        
+                        local key_count=$(wc -l < "$user_home/.ssh/authorized_keys" 2>/dev/null | tr -d ' ')
+                        echo "  ${c_txt}ℹ Количество ключей: $key_count${c_off}"
+                    else
+                        echo "  ${c_txt}⚠ Файл authorized_keys отсутствует${c_off}"
+                    fi
+                    
+                    echo ""
+                done <<< "$users"
+                
+                if [[ $fixed_count -gt 0 ]]; then
+                    log "Исправлено проблем: $fixed_count"
+                    log "Перезапустите SSH для применения изменений"
+                else
+                    log "Все права на SSH-ключи корректны"
+                fi
+                
                 read -rp "Enter — продолжить " _ || true ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
