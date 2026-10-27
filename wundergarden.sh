@@ -399,25 +399,21 @@ ssh_settings_menu() {
                 ufw allow "$new_port/tcp" comment 'SSH' >/dev/null 2>&1 && log "UFW: порт $new_port/tcp открыт" || warn "Ошибка UFW"
                 ufw reload >/dev/null 2>&1 && log "UFW перезапущен" || warn "Ошибка перезапуска UFW"
                 
-                # Создаём полный конфиг безопасности
+                # Меняем только порт, не трогая остальные настройки
                 local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
                 mkdir -p /etc/ssh/sshd_config.d
-                cat > "$cfg" <<EOF
-Port $new_port
-PermitRootLogin prohibit-password
-PubkeyAuthentication yes
-PasswordAuthentication no
-PermitEmptyPasswords no
-GSSAPIAuthentication no
-X11Forwarding no
-MaxAuthTries 3
-MaxSessions 5
-ClientAliveInterval 300
-ClientAliveCountMax 2
-UseDNS no
-ChallengeResponseAuthentication no
-KerberosAuthentication no
-EOF
+                
+                if [[ -f "$cfg" ]]; then
+                    # Конфиг существует - обновляем только порт
+                    if grep -q "^Port " "$cfg" 2>/dev/null; then
+                        sed -i "s|^Port .*|Port $new_port|" "$cfg"
+                    else
+                        echo "Port $new_port" >> "$cfg"
+                    fi
+                else
+                    # Конфига нет - создаём минимальный только с портом
+                    echo "Port $new_port" > "$cfg"
+                fi
                 
                 # Проверяем синтаксис
                 if sshd -t 2>/dev/null; then
@@ -428,22 +424,11 @@ EOF
                     fi
                 else
                     warn "Ошибка в конфигурации SSH! Откат изменений"
-                    cat > "$cfg" <<EOF
-Port $port
-PermitRootLogin prohibit-password
-PubkeyAuthentication yes
-PasswordAuthentication no
-PermitEmptyPasswords no
-GSSAPIAuthentication no
-X11Forwarding no
-MaxAuthTries 3
-MaxSessions 5
-ClientAliveInterval 300
-ClientAliveCountMax 2
-UseDNS no
-ChallengeResponseAuthentication no
-KerberosAuthentication no
-EOF
+                    if grep -q "^Port " "$cfg" 2>/dev/null; then
+                        sed -i "s|^Port .*|Port $port|" "$cfg"
+                    else
+                        echo "Port $port" >> "$cfg"
+                    fi
                 fi
                 read -rp "Enter — продолжить " _ || true ;;
             2)
@@ -469,10 +454,20 @@ EOF
                 echo "${c_mag}=======================================================================================${c_off}"
                 read -r
                 
-                # Создаём полный конфиг безопасности
+                # Отключаем вход по паролю
                 local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
                 mkdir -p /etc/ssh/sshd_config.d
-                cat > "$cfg" <<EOF
+                
+                if [[ -f "$cfg" ]]; then
+                    # Конфиг существует - обновляем только PasswordAuthentication
+                    if grep -q "^PasswordAuthentication" "$cfg" 2>/dev/null; then
+                        sed -i 's|^PasswordAuthentication .*|PasswordAuthentication no|' "$cfg"
+                    else
+                        echo "PasswordAuthentication no" >> "$cfg"
+                    fi
+                else
+                    # Конфига нет - создаём полный конфиг безопасности
+                    cat > "$cfg" <<EOF
 Port $port
 PermitRootLogin prohibit-password
 PubkeyAuthentication yes
@@ -488,6 +483,7 @@ UseDNS no
 ChallengeResponseAuthentication no
 KerberosAuthentication no
 EOF
+                fi
                 
                 # Проверяем синтаксис
                 if sshd -t 2>/dev/null; then
@@ -510,8 +506,17 @@ EOF
                     new_pass_auth="yes"
                 fi
                 
-                # Создаём полный конфиг безопасности
-                cat > "$cfg" <<EOF
+                # Меняем только PasswordAuthentication, не трогая остальные настройки
+                if [[ -f "$cfg" ]]; then
+                    # Конфиг существует - обновляем только PasswordAuthentication
+                    if grep -q "^PasswordAuthentication" "$cfg" 2>/dev/null; then
+                        sed -i "s|^PasswordAuthentication .*|PasswordAuthentication $new_pass_auth|" "$cfg"
+                    else
+                        echo "PasswordAuthentication $new_pass_auth" >> "$cfg"
+                    fi
+                else
+                    # Конфига нет - создаём полный конфиг безопасности
+                    cat > "$cfg" <<EOF
 Port $port
 PermitRootLogin prohibit-password
 PubkeyAuthentication yes
@@ -527,6 +532,7 @@ UseDNS no
 ChallengeResponseAuthentication no
 KerberosAuthentication no
 EOF
+                fi
                 
                 # Проверяем синтаксис
                 if sshd -t 2>/dev/null; then
@@ -552,8 +558,17 @@ EOF
                     *) new_val="prohibit-password" ;;
                 esac
                 
-                # Создаём полный конфиг безопасности
-                cat > "$cfg" <<EOF
+                # Меняем только PermitRootLogin, не трогая остальные настройки
+                if [[ -f "$cfg" ]]; then
+                    # Конфиг существует - обновляем только PermitRootLogin
+                    if grep -q "^PermitRootLogin" "$cfg" 2>/dev/null; then
+                        sed -i "s|^PermitRootLogin .*|PermitRootLogin $new_val|" "$cfg"
+                    else
+                        echo "PermitRootLogin $new_val" >> "$cfg"
+                    fi
+                else
+                    # Конфига нет - создаём полный конфиг безопасности
+                    cat > "$cfg" <<EOF
 Port $port
 PermitRootLogin $new_val
 PubkeyAuthentication yes
@@ -569,6 +584,7 @@ UseDNS no
 ChallengeResponseAuthentication no
 KerberosAuthentication no
 EOF
+                fi
                 
                 # Проверяем синтаксис
                 if sshd -t 2>/dev/null; then
@@ -591,8 +607,6 @@ change_ssh_port_direct() {
     clear
     require_cmd ufw ufw
     local port=$(get_ssh_port)
-    local pass_auth=$(grep "^PasswordAuthentication" /etc/ssh/sshd_config.d/99-homeserver.conf 2>/dev/null | awk '{print $2}' || echo "no")
-    local root_login=$(grep "^PermitRootLogin" /etc/ssh/sshd_config.d/99-homeserver.conf 2>/dev/null | awk '{print $2}' || echo "prohibit-password")
     
     echo "${c_mag}=== Изменить SSH-порт ===${c_off}"
     echo "${c_txt}Текущий порт: $port${c_off}"
@@ -602,25 +616,21 @@ change_ssh_port_direct() {
     ufw allow "$new_port/tcp" comment 'SSH' >/dev/null 2>&1 && log "UFW: порт $new_port/tcp открыт" || warn "Ошибка UFW"
     ufw reload >/dev/null 2>&1 && log "UFW перезапущен" || warn "Ошибка перезапуска UFW"
     
-    # Создаём полный конфиг безопасности
+    # Меняем только порт, не трогая остальные настройки
     local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
     mkdir -p /etc/ssh/sshd_config.d
-    cat > "$cfg" <<EOF
-Port $new_port
-PermitRootLogin $root_login
-PubkeyAuthentication yes
-PasswordAuthentication $pass_auth
-PermitEmptyPasswords no
-GSSAPIAuthentication no
-X11Forwarding no
-MaxAuthTries 3
-MaxSessions 5
-ClientAliveInterval 300
-ClientAliveCountMax 2
-UseDNS no
-ChallengeResponseAuthentication no
-KerberosAuthentication no
-EOF
+    
+    if [[ -f "$cfg" ]]; then
+        # Конфиг существует - обновляем только порт
+        if grep -q "^Port " "$cfg" 2>/dev/null; then
+            sed -i "s|^Port .*|Port $new_port|" "$cfg"
+        else
+            echo "Port $new_port" >> "$cfg"
+        fi
+    else
+        # Конфига нет - создаём минимальный только с портом
+        echo "Port $new_port" > "$cfg"
+    fi
     
     # Проверяем синтаксис
     if sshd -t 2>/dev/null; then
@@ -630,7 +640,12 @@ EOF
             warn "Ошибка перезапуска SSH"
         fi
     else
-        warn "Ошибка в конфигурации SSH!"
+        warn "Ошибка в конфигурации SSH! Откат изменений"
+        if grep -q "^Port " "$cfg" 2>/dev/null; then
+            sed -i "s|^Port .*|Port $port|" "$cfg"
+        else
+            echo "Port $port" >> "$cfg"
+        fi
     fi
     read -rp "Enter — продолжить " _ || true
 }
@@ -721,6 +736,7 @@ ABEOF
         warn "Ошибка применения"
     fi
     read -rp "Enter — продолжить " _ || true
+    return 0
 }
 
 block_rkn() {
@@ -780,6 +796,7 @@ EOF
     
     log "Блокировка РКН через ipset завершена!"
     read -rp "Enter — продолжить " _ || true
+    return 0
 }
 
 swap_menu() {
@@ -848,7 +865,7 @@ sudo_logging_menu() {
         read -rp "Номер: " c || true
         case "$c" in
             1)
-                if ! grep -q "^Defaults.*logfile=/var/log/sudo.log" /etc/sudoers 2>/dev/null; then
+                if ! grep -q "^Defaults.*logfile.*sudo.log" /etc/sudoers 2>/dev/null; then
                     echo 'Defaults logfile="/var/log/sudo.log"' >> /etc/sudoers
                     if visudo -cf /etc/sudoers >/dev/null; then
                         touch /var/log/sudo.log
@@ -857,15 +874,15 @@ sudo_logging_menu() {
                         log "Файл лога: /var/log/sudo.log"
                     else
                         warn "Ошибка в конфигурации sudoers, откат изменений"
-                        sed -i '/^Defaults.*logfile=\/var\/log\/sudo.log$/d' /etc/sudoers
+                        sed -i '/^Defaults.*logfile.*sudo.log/d' /etc/sudoers
                     fi
                 else
                     log "Логирование sudo включено"
                 fi
                 read -rp "Enter — продолжить " _ || true ;;
             2)
-                if grep -q "^Defaults.*logfile=/var/log/sudo.log" /etc/sudoers 2>/dev/null; then
-                    sed -i '/^Defaults.*logfile=\/var\/log\/sudo.log$/d' /etc/sudoers
+                if grep -q "^Defaults.*logfile.*sudo.log" /etc/sudoers 2>/dev/null; then
+                    sed -i '/^Defaults.*logfile.*sudo.log/d' /etc/sudoers
                     if visudo -cf /etc/sudoers >/dev/null; then
                         log "Логирование sudo отключено"
                     else
@@ -883,14 +900,18 @@ sudo_logging_menu() {
                     echo "${c_txt}Файл лога не найден: /var/log/sudo.log${c_off}"
                     echo "${c_txt}Логирование sudo не включено или записей ещё не было${c_off}"
                     if ask_yn "Включить логирование sudo?"; then
-                        echo 'Defaults logfile="/var/log/sudo.log"' >> /etc/sudoers
-                        if visudo -cf /etc/sudoers >/dev/null; then
-                            touch /var/log/sudo.log
-                            chmod 600 /var/log/sudo.log
-                            log "Логирование sudo включено"
-                            log "Файл лога: /var/log/sudo.log"
+                        if ! grep -q "^Defaults.*logfile.*sudo.log" /etc/sudoers 2>/dev/null; then
+                            echo 'Defaults logfile="/var/log/sudo.log"' >> /etc/sudoers
+                            if visudo -cf /etc/sudoers >/dev/null; then
+                                touch /var/log/sudo.log
+                                chmod 600 /var/log/sudo.log
+                                log "Логирование sudo включено"
+                                log "Файл лога: /var/log/sudo.log"
+                            else
+                                warn "Ошибка в конфигурации sudoers"
+                            fi
                         else
-                            warn "Ошибка в конфигурации sudoers"
+                            log "Логирование sudo уже включено"
                         fi
                     fi
                     read -rp "Enter — продолжить " _ || true
@@ -932,20 +953,14 @@ fail2ban_menu() {
         local listening_ports=$(ss -tlnp 2>/dev/null | awk 'NR>1 {print $4}' | grep -oE '[0-9]+$' | sort -un)
         
         if [[ -n "$listening_ports" ]]; then
-            printf "  %-15s %-24s %s\n" "Порт" "    Процесс" "     Fail2ban"
-            printf "  %-15s %-24s %s\n" "---" "---" "---"
+            printf "  %-15s %s\n" "Порт" "Процесс"
+            printf "  %-15s %s\n" "---" "---"
             
             for port in $listening_ports; do
                 # Получаем имя процесса для порта
                 local process=$(ss -tlnp 2>/dev/null | grep ":${port} " | grep -oP 'users:\(\("\K[^"]+' | head -1 || echo "unknown")
                 
-                # Проверяем, защищён ли порт fail2ban
-                local f2b_protected="выкл"
-                if fail2ban-client status 2>/dev/null | grep -q "$port"; then
-                    f2b_protected="✔ активен"
-                fi
-                
-                printf "  %-15s %-20s %s\n" "${port}/tcp" "$process" "$f2b_protected"
+                printf "  %-15s %s\n" "${port}/tcp" "$process"
             done
         else
             echo "${c_txt}  (нет слушающих портов)${c_off}"
@@ -957,7 +972,7 @@ fail2ban_menu() {
         echo "${c_txt}  maxretry: $maxretry${c_off}"
         echo "${c_txt}  findtime: ${findtime}с${c_off}"
         if [[ -n "$current_ports" ]]; then
-            echo "${c_txt}  порты: $current_ports${c_off}"
+            echo "${c_txt}  защищённые порты: $current_ports${c_off}"
         fi
         echo ""
         echo "${c_txt}1. Установить/переустановить Fail2ban${c_off}"
@@ -1247,27 +1262,6 @@ setup_scheduled_reboot() {
     if [[ -f "$cron" ]]; then
         local schedule=$(cat "$cron" | grep -v '^#' | grep -v '^$' | head -1)
         echo "${c_txt}Текущее: $schedule${c_off}"
-        
-        # Парсим cron для человекопонятного описания
-        local minute hour dom dow
-        # Извлекаем только первые 5 полей (минуты, часы, день месяца, месяц, день недели)
-        read -r minute hour dom dow _ <<< "$(echo "$schedule" | awk '{print $1, $2, $3, $4, $5}')"
-        local desc=""
-        
-        # Проверяем, что hour и minute являются числами
-        if [[ "$hour" =~ ^[0-9]+$ && "$minute" =~ ^[0-9]+$ ]]; then
-            if [[ "$dom" == "*" && "$dow" == "*" ]]; then
-                desc="Ежедневно в $(printf '%02d' "$hour"):$(printf '%02d' "$minute")"
-            elif [[ "$dom" == "*" ]]; then
-                local day_names=("" "Понедельник" "Вторник" "Среда" "Четверг" "Пятница" "Суббота" "Воскресенье")
-                desc="Еженедельно, ${day_names[$dow]} в $(printf '%02d' "$hour"):$(printf '%02d' "$minute")"
-            else
-                desc="Ежемесячно, ${dom}-го числа в $(printf '%02d' "$hour"):$(printf '%02d' "$minute")"
-            fi
-        else
-            desc="Не удалось распарсить расписание"
-        fi
-        echo "${c_txt}$desc${c_off}"
         echo ""
         echo "${c_txt}1. Выключить${c_off}"
         echo "${c_txt}2. Изменить${c_off}"
@@ -1426,7 +1420,7 @@ server_menu() {
         local pass_policy="выключена"; grep -q "pam_pwquality.so" /etc/pam.d/common-password 2>/dev/null && pass_policy="включена"
         local ssh_port=$(get_ssh_port)
         local ufw_status=$(ufw status 2>/dev/null | head -1 | awk '{print $2}' || echo '?')
-        local f2b_status=$(systemctl is-active fail2ban 2>/dev/null | head -1 | tr -d '\n\r' || echo "inactive")
+        local f2b_status="выкл"; systemctl is-active fail2ban >/dev/null 2>&1 && f2b_status="active"
         local swap_status=$(swapon --show=SIZE --noheadings 2>/dev/null | head -1 || echo "нет")
         local sudo_log="выкл"; grep -q "^Defaults.*logfile=/var/log/sudo.log" /etc/sudoers 2>/dev/null && sudo_log="вкл"
         local root_mail="не настроено"; command -v msmtp >/dev/null && grep -qs "account default" /etc/msmtprc 2>/dev/null && root_mail="настроено"
