@@ -26,11 +26,11 @@ install_nginx_host() {
         log "nginx уже установлен: $(nginx -v 2>&1)"
         return 0
     fi
-    
+
     log "Устанавливаю nginx-full из репозитория Debian..."
     apt-get update -qq
     apt-get install -y -qq nginx-full
-    
+
     # Проверяем наличие нужных модулей
     if nginx -V 2>&1 | grep -q 'with-stream'; then
         log "Модуль stream: присутствует"
@@ -42,11 +42,11 @@ install_nginx_host() {
     else
         die "nginx собран без модуля stream_ssl_preread"
     fi
-    
+
     # Создаём директории
     mkdir -p "$NGINX_CONFIG_DIR"/{conf.d,stream.d,htpasswd,certs}
     mkdir -p /var/log/nginx
-    
+
     # Генерируем nginx.conf
     cat > "$NGINX_CONF" <<NGXEOF
 user www-data;
@@ -96,8 +96,8 @@ http {
     }
 
     server {
-        listen 8443 ssl default_server;
-        listen [::]:8443 ssl default_server;
+        listen 127.0.0.1:8443 ssl default_server;
+        listen [::1]:8443 ssl default_server;
         ssl_certificate     $NGINX_CONFIG_DIR/certs/fullchain.pem;
         ssl_certificate_key $NGINX_CONFIG_DIR/certs/privkey.pem;
         return 444;
@@ -118,7 +118,7 @@ stream {
     }
 }
 NGXEOF
-    
+
     # Создаём базовые include-файлы
     cat > "$NGINX_CONFIG_DIR/proxy_common.conf" <<'NGXEOF'
 proxy_set_header Host $host;
@@ -145,11 +145,11 @@ map $ssl_preread_server_name $stream_upstream {
 }
 upstream web_tls { server 127.0.0.1:8443; }
 NGXEOF
-    
+
     # Права на директории
     chown -R root:www-data "$NGINX_CONFIG_DIR"
     chmod 750 "$NGINX_CONFIG_DIR/certs"
-    
+
     # UFW
     if command -v ufw >/dev/null 2>&1; then
         ufw allow 80/tcp comment 'nginx HTTP' >/dev/null 2>&1 || true
@@ -157,12 +157,19 @@ NGXEOF
         ufw reload >/dev/null 2>&1 || true
         log "UFW: порты 80/tcp и 443/tcp открыты"
     fi
-    
+
     # Тест конфига и запуск
-    nginx -t 2>&1 || die "nginx: ошибка в конфигурации"
-    systemctl enable --now nginx
-    log "nginx установлен и запущен: $(nginx -v 2>&1)"
-    
+    if [[ -f "$NGINX_CONFIG_DIR/certs/fullchain.pem" && -f "$NGINX_CONFIG_DIR/certs/privkey.pem" ]]; then
+        nginx -t 2>&1 || die "nginx: ошибка в конфигурации"
+        systemctl enable --now nginx
+        log "nginx установлен и запущен: $(nginx -v 2>&1)"
+    else
+        warn "Сертификаты ещё не найдены в $NGINX_CONFIG_DIR/certs — nginx установлен, но не запущен."
+        warn "Сначала выпустите сертификаты (пункт 1), затем запустите nginx вручную или повторите установку."
+        nginx -t 2>&1 || warn "nginx: конфиг ещё не валиден до появления сертификатов"
+        systemctl enable nginx 2>/dev/null || true
+    fi
+
     read -rp "Enter — продолжить " _ || true
 }
 
@@ -196,6 +203,52 @@ dns_hint() {
     fi
 }
 
+find_certificates() {
+    local cert_dir="$NGINX_CONFIG_DIR/certs"
+    echo "${c_txt}Путь к сертификатам: ${cert_dir}${c_off}"
+    if [[ -f "$cert_dir/fullchain.pem" || -f "$cert_dir/privkey.pem" ]]; then
+        ls -l "$cert_dir" 2>/dev/null || true
+    else
+        warn "Сертификаты в текущем каталоге не найдены."
+        warn "Проверьте: $cert_dir"
+    fi
+    if [[ -d "$HOME/.acme.sh" ]]; then
+        echo "${c_txt}acme.sh данные: $HOME/.acme.sh${c_off}"
+    fi
+    read -rp "Enter — продолжить " _ || true
+}
+
+remove_nginx_keep_certs() {
+    local cert_dir="$NGINX_CONFIG_DIR/certs"
+    local backup_dir="/var/backups/wundergarden-nginx-certs-$(date +%s)"
+
+    if [[ -d "$cert_dir" ]]; then
+        mkdir -p "$backup_dir"
+        cp -a "$cert_dir/." "$backup_dir/" 2>/dev/null || true
+        log "Сертификаты сохранены в резервную копию: $backup_dir"
+    fi
+
+    systemctl disable --now nginx 2>/dev/null || true
+    apt-get purge -y nginx nginx-common nginx-full 2>/dev/null || apt-get remove --purge -y nginx* 2>/dev/null || true
+    rm -rf /etc/nginx /var/lib/nginx /var/log/nginx 2>/dev/null || true
+
+    if [[ -d "$NGINX_CONFIG_DIR" ]]; then
+        rm -rf "$NGINX_CONFIG_DIR/conf.d" "$NGINX_CONFIG_DIR/stream.d" "$NGINX_CONFIG_DIR/htpasswd" "$NGINX_CONFIG_DIR/proxy_common.conf" "$NGINX_CONFIG_DIR/ws_common.conf"
+        mkdir -p "$NGINX_CONFIG_DIR/certs"
+    fi
+
+    log "nginx удалён из системы; сертификаты сохранены и каталог certs оставлен в $NGINX_CONFIG_DIR/certs"
+    read -rp "Enter — продолжить " _ || true
+}
+
+watch_nginx_logs() {
+    if [[ -f /var/log/nginx/error.log || -f /var/log/nginx/access.log ]]; then
+        tail -n 30 -F /var/log/nginx/error.log /var/log/nginx/access.log
+    else
+        journalctl -u nginx -n 30 -f
+    fi
+}
+
 front_nginx_menu() {
     while true; do
         local st; st=$(systemctl is-active nginx 2>/dev/null || echo "не установлен")
@@ -211,6 +264,9 @@ ${c_mag} --- nginx и сертификаты: $st ---${c_off}
   ${c_num}5.${c_off} ${c_txt}Показать полный текущий конфиг${c_off}
   ${c_num}6.${c_off} ${c_txt}HSTS: $(onoff "${HSTS_ENABLED:-false}")${c_off}
   ${c_num}7.${c_off} ${c_txt}Перечитать конфигурацию${c_off}
+  ${c_num}8.${c_off} ${c_txt}Найти сертификаты${c_off}
+  ${c_num}9.${c_off} ${c_txt}Удалить nginx, оставив сертификаты${c_off}
+  ${c_num}10.${c_off} ${c_txt}Смотреть логи nginx${c_off}
   ${c_txt}Порты: 80, 443${c_off}
 
   ${c_num}0.${c_off} ${c_txt}Назад${c_off}
@@ -300,6 +356,9 @@ SUM
                 reload_nginx
                 log "HSTS: $(onoff "$HSTS_ENABLED")" ;;
             7) reload_nginx ;;
+            8) find_certificates ;;
+            9) remove_nginx_keep_certs ;;
+            10) watch_nginx_logs ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
         esac
@@ -308,9 +367,9 @@ SUM
 
 certs_menu() {
     log "=== Сертификаты (acme.sh, wildcard через DNS-01) ==="
-    
+
     [[ -f "$ENV_FILE" ]] && load_env
-    
+
     if [[ -z "${DOMAIN:-}" ]]; then
         local domain_input
         domain_input=$(ask "Ваш домен (например: example.com)" "")
@@ -321,18 +380,18 @@ certs_menu() {
             die "Домен не указан - невозможно выпустить сертификат"
         fi
     fi
-    
+
     if [[ -z "${EMAIL:-}" ]]; then
         EMAIL=$(ask "Email для Let's Encrypt" "admin@$DOMAIN")
         export EMAIL
         update_env EMAIL "$EMAIL"
     fi
-    
+
     if [[ ! -x "$HOME/.acme.sh/acme.sh" ]]; then
         ask_yn "Установить acme.sh?" || return 0
         curl -fsSL https://get.acme.sh | sh -s email="$EMAIL" || die "установка acme.sh не удалась"
     fi
-    
+
     local prov="${ACME_DNS_PROVIDER:-dns_cf}"
     echo "${c_txt}DNS-провайдер acme.sh (код модуля): dns_cf (Cloudflare), dns_selectel, dns_desec, dns_hetzner,${c_off}"
     echo "${c_txt}  dns_yandex, dns_regru... Полный список: https://github.com/acmesh-official/acme.sh/wiki/dnsapi${c_off}"
@@ -350,30 +409,45 @@ certs_menu() {
     mkdir -p "$NGINX_CONFIG_DIR/certs"
 
     export CF_Token="$key1" CF_Account_ID="$key2"
-    
+
+    local cert_dir="$NGINX_CONFIG_DIR/certs"
+    local cert_exists=false
+    if [[ -f "$cert_dir/fullchain.pem" && -f "$cert_dir/privkey.pem" ]]; then
+        cert_exists=true
+        echo "${c_txt}Сертификаты уже существуют: $cert_dir${c_off}"
+        ls -l "$cert_dir/fullchain.pem" "$cert_dir/privkey.pem" 2>/dev/null || true
+        ask_yn "Перевыпустить/обновить сертификаты сейчас?" || return 0
+    fi
+
     # Формируем reloadcmd: выставляет права и перезагружает nginx
-    local reloadcmd="chown root:www-data ${NGINX_CONFIG_DIR}/certs/privkey.pem && chmod 640 ${NGINX_CONFIG_DIR}/certs/privkey.pem && chown root:www-data ${NGINX_CONFIG_DIR}/certs/fullchain.pem && chmod 644 ${NGINX_CONFIG_DIR}/certs/fullchain.pem && systemctl reload nginx"
-    
+    local reloadcmd="chown root:www-data ${NGINX_CONFIG_DIR}/certs/privkey.pem && chmod 640 ${NGINX_CONFIG_DIR}/certs/privkey.pem && chown root:www-data ${NGINX_CONFIG_DIR}/certs/fullchain.pem && chmod 644 ${NGINX_CONFIG_DIR}/certs/fullchain.pem && (systemctl reload nginx || true)"
+
     log "Выпускаю сертификат для $DOMAIN и *.$DOMAIN (DNS-01)..."
-    "$HOME/.acme.sh/acme.sh" --issue --dns "$prov" -d "$DOMAIN" -d "*.$DOMAIN" --server letsencrypt \
-        || die "выпуск не удался — проверьте DNS API credentials и propagation"
+    if [[ "$cert_exists" == true ]]; then
+        "$HOME/.acme.sh/acme.sh" --renew -d "$DOMAIN" -d "*.$DOMAIN" --dns "$prov" --server letsencrypt --force \
+            || "$HOME/.acme.sh/acme.sh" --issue --dns "$prov" -d "$DOMAIN" -d "*.$DOMAIN" --server letsencrypt --force \
+            || die "перевыпуск не удался — проверьте DNS API credentials и propagation"
+    else
+        "$HOME/.acme.sh/acme.sh" --issue --dns "$prov" -d "$DOMAIN" -d "*.$DOMAIN" --server letsencrypt \
+            || die "выпуск не удался — проверьте DNS API credentials и propagation"
+    fi
 
     "$HOME/.acme.sh/acme.sh" --install-cert -d "$DOMAIN" \
         --fullchain-file "$NGINX_CONFIG_DIR/certs/fullchain.pem" \
         --key-file "$NGINX_CONFIG_DIR/certs/privkey.pem" \
         --reloadcmd "$reloadcmd" \
         && log "Сертификаты установлены, права выставлены, nginx перезагружен."
-    
+
     # Выставляем права сразу (на случай если reloadcmd не сработал при первом --install-cert)
     chown root:www-data "$NGINX_CONFIG_DIR/certs/privkey.pem"
     chmod 640 "$NGINX_CONFIG_DIR/certs/privkey.pem"
     chown root:www-data "$NGINX_CONFIG_DIR/certs/fullchain.pem"
     chmod 644 "$NGINX_CONFIG_DIR/certs/fullchain.pem"
-    
+
     if [[ -f "$NGINX_CONFIG_DIR/certs/fullchain.pem" && -f "$NGINX_CONFIG_DIR/certs/privkey.pem" ]]; then
         log "✓ Оба файла сертификатов существуют"
         [[ -f "$ENV_FILE" ]] && update_env CERT_ISSUED "yes"
-        
+
         if systemctl is-active --quiet nginx; then
             nginx -t 2>/dev/null && systemctl reload nginx \
                 && log "nginx перезагружен" \
@@ -388,6 +462,6 @@ certs_menu() {
         [[ ! -f "$NGINX_CONFIG_DIR/certs/fullchain.pem" ]] && warn "  - Отсутствует: fullchain.pem"
         [[ ! -f "$NGINX_CONFIG_DIR/certs/privkey.pem" ]] && warn "  - Отсутствует: privkey.pem"
     fi
-    
+
     read -rp "Enter — продолжить " _ || true
 }
