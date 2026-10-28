@@ -1704,7 +1704,6 @@ server_menu() {
         local pass_policy="выключена"; grep -q "pam_pwquality.so" /etc/pam.d/common-password 2>/dev/null && pass_policy="включена"
         local ssh_port=$(get_ssh_port)
         local ufw_status=$(ufw status 2>/dev/null | head -1 | awk '{print $2}' || echo '?')
-        local f2b_status="выкл"; systemctl is-active fail2ban >/dev/null 2>&1 && f2b_status="active"
         local swap_status=$(swapon --show=SIZE --noheadings 2>/dev/null | head -1 || echo "нет")
         local sudo_log="выкл"; grep -q "^Defaults.*logfile.*sudo.log" /etc/sudoers 2>/dev/null && sudo_log="вкл"
         local root_mail="не настроено"; command -v msmtp >/dev/null && grep -qs "account default" /etc/msmtprc 2>/dev/null && root_mail="настроено"
@@ -1720,7 +1719,7 @@ ${c_mag}$(_t SRV00)${c_off}
   ${c_num}4.${c_off} ${c_txt}$(_t SRV03)${c_off}
   ${c_num}5.${c_off} ${c_txt}$(_t SRV04): порт $ssh_port${c_off}
   ${c_num}6.${c_off} ${c_txt}$(_t SRV05): $ufw_status${c_off}
-  ${c_num}7.${c_off} ${c_txt}$(_t SRV06): $f2b_status${c_off}
+  ${c_num}7.${c_off} ${c_txt}$(_t SRV06)${c_off}
   ${c_num}8.${c_off} ${c_txt}$(_t SRV07)${c_off}
   ${c_num}9.${c_off} ${c_txt}$(_t SRV08): $swap_status${c_off}
   ${c_num}10.${c_off} ${c_txt}$(_t SRV09): $sudo_log${c_off}
