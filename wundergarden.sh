@@ -39,7 +39,7 @@ banner() {
         printf '%s  W U N D E R G A R D E N%s\n' "$c_mag" "$c_off"
         return 0
     fi
-    cat <<BAN
+    cat <<'BAN'
 ${c_mag}                                                                          
                        ▄▄                                  ▄▄             
                        ██                                  ██             
@@ -732,9 +732,9 @@ abuse_block_setup() {
     cat > "$script" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-URL="$url"
-TMP="$(mktemp)"
-trap 'rm -f "$TMP"' EXIT
+URL='${url}'
+TMP=" $(mktemp)"
+trap 'rm -f "\$TMP"' EXIT
 
 get_default_external_iface() {
     ip route show default 2>/dev/null | awk 'NR==1 {print \$5; exit}' || true
@@ -758,7 +758,7 @@ while IFS= read -r cidr; do
     ipset add abuse4_tmp "\$cidr" 2>/dev/null || true
 done < "\$TMP"
 
-if ipset save abuse4_tmp 2>/dev/null | grep -Eq '(^|[[:space:]])(0\.0\.0\.0/8|10\.0\.0\.0/8|127\.0\.0\.0/8|169\.254\.0\.0/16|172\.16\.0\.0/12|192\.168\.0\.0/16|198\.18\.0\.0/15)([[:space:]]|$)'; then
+if ipset save abuse4_tmp 2>/dev/null | grep -Eq '(^|[[:space:]])(0\.[0-9]+\.[0-9]+\.[0-9]+/8|10\.0\.0\.0/8|127\.0\.0\.0/8|169\.254\.0\.0/16|172\.16\.0\.0/12|192\.168\.0\.0/16|198\.18\.0\.0/15)([[:space:]]|$)'; then
     echo "abuse4 содержит частные/резервные CIDR — загрузка отменена"
     ipset destroy abuse4_tmp 2>/dev/null || true
     exit 1
