@@ -1128,7 +1128,7 @@ fail2ban_menu() {
                 local maxretry_input; maxretry_input=$(ask "Введите максимальное число неудачных попыток (maxretry)" "5")
                 local bantime_input; bantime_input=$(ask "Введите время блокировки в секундах (bantime)" "3600")
                 
-                cat > "$jail_file" <<EOF
+                cat > "$jail_file" <<-JAIL_EOF
 [DEFAULT]
 ignoreip = 127.0.0.1/8 ::1
 bantime  = $bantime_input
@@ -1141,7 +1141,7 @@ port = $ports_input
 filter = sshd
 logpath = /var/log/auth.log
 maxretry = $maxretry_input
-EOF
+JAIL_EOF
                 
                 systemctl enable fail2ban
                 systemctl restart fail2ban
