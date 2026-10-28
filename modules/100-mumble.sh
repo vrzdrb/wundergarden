@@ -40,15 +40,11 @@ install_mumble() {
     
     update_env MUMBLE_PROTOCOL "$protocol_choice"
     
-    # Открываем порты в UFW
+    # Открываем порты в UFW (всегда оба протокола)
     require_cmd ufw ufw
     log "Открываем порты в UFW..."
     ufw allow 64738/tcp comment 'Mumble' >/dev/null 2>&1 && log "UFW: порт 64738/tcp открыт" || warn "Ошибка UFW"
-    
-    if [[ "$protocol_choice" == "1" ]]; then
-        ufw allow 64738/udp comment 'Mumble' >/dev/null 2>&1 && log "UFW: порт 64738/udp открыт" || warn "Ошибка UFW"
-    fi
-    
+    ufw allow 64738/udp comment 'Mumble' >/dev/null 2>&1 && log "UFW: порт 64738/udp открыт" || warn "Ошибка UFW"
     ufw reload >/dev/null 2>&1 && log "UFW перезапущен" || warn "Ошибка перезапуска UFW"
     
     # Создаём директорию для данных и сертификатов
@@ -68,7 +64,18 @@ install_mumble() {
     
     # Запускаем Mumble через docker compose
     log "Запускаем Mumble через docker compose..."
-    docker compose up -d mumble
+    
+    # Если выбран TCP-only, модифицируем docker-compose.yml
+    if [[ "$protocol_choice" == "2" ]]; then
+        log "Режим TCP-only: удаляю UDP порт из docker-compose.yml..."
+        # Создаём резервную копию
+        cp "$COMPOSE_FILE" "$COMPOSE_FILE.bak"
+        # Удаляем строку с UDP для mumble
+        sed -i '/mumble:/,/^[[:space:]]*$/ s/- "64738:64738\/udp"/# - "64738:64738\/udp" # отключено (TCP-only)/' "$COMPOSE_FILE"
+        docker compose up -d --force-recreate mumble
+    else
+        docker compose up -d mumble
+    fi
     
     sleep 3
     

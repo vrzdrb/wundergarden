@@ -26,7 +26,8 @@ install_matrix() {
 
     local desc="" reg_mode="closed" reg_token="${REGISTRATION_TOKEN:-}" suspend_new="false" \
           e2ee="true" suffix_mode="flag" suffix_custom="" block_invites="false" \
-          auto_join="" ann="false" cache_mode="default" fed="false" online_backup="true"
+          auto_join="" ann="false" cache_mode="default" fed="false" online_backup="true" \
+          coturn_protocol="udp+tcp"
 
     while true; do
         local reg_descr="закрыта" suffix_descr="флаг 🏳️‍⚧️ (по умолчанию)" cache_descr="по умолчанию"
@@ -50,7 +51,7 @@ ${c_mag} --- Настройки continuwuity ---${c_off}
   ${c_num}8.${c_off} ${c_txt}Профиль кэша БД: $cache_descr${c_off}
   ${c_num}9.${c_off} ${c_txt}Федерация с другими серверами: $(onoff "$fed")${c_off}
  ${c_num}10.${c_off} ${c_txt}Онлайн-бэкапы базы: $(onoff "$online_backup")${c_off}
- ${c_num}11.${c_off} ${c_txt}TURN/STUN: turn:$SUB_TURN:3478${c_off}
+ ${c_num}11.${c_off} ${c_txt}TURN/STUN протокол: $coturn_protocol${c_off}
 
   ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
@@ -94,7 +95,16 @@ SUM
                 echo "${c_txt}порт 8448 (или 443), постоянную модерацию. Для сервера на двоих — не нужна.${c_off}"
                 ask_yn "Включить федерацию?" && fed="true" || fed="false" ;;
             10) [[ "$online_backup" == "true" ]] && online_backup="false" || online_backup="true" ;;
-            11) log "TURN: turn:$SUB_TURN:3478 (udp+tcp), shared-secret, TTL 86400. Меняется только через повтор пункта 5." ;;
+            11)
+                echo "${c_txt}Протокол TURN/STUN:${c_off}"
+                echo "${c_txt}  1) UDP + TCP (рекомендуется — максимальная совместимость)${c_off}"
+                echo "${c_txt}  2) Только TCP (если UDP заблокирован или занят)${c_off}"
+                local proto_choice; proto_choice="$(ask "1/2" "1")"
+                case "$proto_choice" in
+                    2) coturn_protocol="tcp" ;;
+                    *) coturn_protocol="udp+tcp" ;;
+                esac
+                ;;
             12) logs_menu matrix coturn  ;;
             0) break ;;
             *) warn "нет такого пункта" ;;
@@ -140,7 +150,16 @@ $autojoin_block
 $backup_block
 $desc_line
 
-turn_uris = ["turn:$SUB_TURN:3478?transport=udp", "turn:$SUB_TURN:3478?transport=tcp"]
+# Генерируем turn_uris в зависимости от выбранного протокола
+    local turn_uris_line=""
+    if [[ "$coturn_protocol" == "tcp" ]]; then
+        turn_uris_line="turn_uris = [\"turn:$SUB_TURN:3478?transport=tcp\"]"
+    else
+        turn_uris_line="turn_uris = [\"turn:$SUB_TURN:3478?transport=udp\", \"turn:$SUB_TURN:3478?transport=tcp\"]"
+    fi
+    
+    echo "$turn_uris_line" >> "$CONFIG_ROOT/config/matrix/continuwuity.toml"
+    cat >> "$CONFIG_ROOT/config/matrix/continuwuity.toml" <<EOF
 turn_secret = "$TURN_PASSWORD"
 turn_ttl = 86400
 EOF
@@ -155,6 +174,14 @@ min-port=49152
 max-port=65535
 external-ip=$pub_ip
 log-file=stdout
+EOF
+    
+    # Если выбран только TCP, добавляем no-udp
+    if [[ "$coturn_protocol" == "tcp" ]]; then
+        echo "no-udp" >> "$DATA_DIR/coturn/turnserver.conf"
+    fi
+    
+    cat >> "$DATA_DIR/coturn/turnserver.conf" <<EOF
 denied-peer-ip=0.0.0.0-0.255.255.255
 denied-peer-ip=127.0.0.0-127.255.255.255
 denied-peer-ip=10.0.0.0-10.255.255.255
@@ -190,12 +217,12 @@ EOF
         "  -> токен -> регистрация в клиенте" \
         "  Либо: docker compose exec matrix continuwuity --execute \"users create_user <имя>\"" \
         "" \
-        "TURN/STUN: turn:$SUB_TURN:3478 (udp+tcp)" \
-        "Порты 3478 и 5349 открыты в UFW"
+        "TURN/STUN: turn:$SUB_TURN:3478 ($coturn_protocol)" \
+        "Порты 3478 и 5349 открыты в UFW (tcp+udp)"
     
     # Сохранение параметров в файл
     log_connection_params "Matrix" \
         "URL: https://$SUB_MATRIX" \
         "Регистрация: $reg_descr" \
-        "TURN: turn:$SUB_TURN:3478"
+        "TURN: turn:$SUB_TURN:3478 ($coturn_protocol)"
 }
