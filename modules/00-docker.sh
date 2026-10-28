@@ -80,7 +80,6 @@ services:
   nginx:
     image: linuxserver/nginx
     restart: unless-stopped
-    <<: *harden
     cap_add: [NET_BIND_SERVICE]
     logging: *log
     ports:
