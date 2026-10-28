@@ -2,6 +2,7 @@
 
 install_limesurvey() {
     ensure_prepared
+    check_dependencies
     log "=== LimeSurvey (опросы и тесты) ==="
     local SUB="${SUB_LIMESURVEY:-survey.$DOMAIN}" dbtype="${LIMESURVEY_DB_TYPE:-mysql}" \
           admin_user="${LIMESURVEY_ADMIN_USER:-admin}" admin_name="${LIMESURVEY_ADMIN_NAME:-Admin}" \
@@ -11,7 +12,6 @@ install_limesurvey() {
     dns_hint "$SUB"
 
     while true; do
-        clear
         clear
         cat <<SUM
 
@@ -68,20 +68,33 @@ SUM
 
     add_site 49-survey "server {
     listen 8443 ssl;
+    listen [::]:8443 ssl;
     server_name $SUB;
-    ssl_certificate     /etc/nginx/certs/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_certificate     $CONFIG_ROOT/config/nginx/certs/fullchain.pem;
+    ssl_certificate_key $CONFIG_ROOT/config/nginx/certs/privkey.pem;
     client_max_body_size 50m;
     location / {
-        proxy_pass http://limesurvey:80;
-        include /etc/nginx/proxy_common.conf;
+        proxy_pass http://127.0.0.1:3003;
+        include $CONFIG_ROOT/config/nginx/proxy_common.conf;
     }
 }"
-    cat <<EOF
-
- Готово: https://$SUB  (админка: /index.php/admin/admin)
- Логин: $admin_user | пароль: $admin_pass (в .env: LIMESURVEY_ADMIN_PASSWORD)
- БД: $dbtype ($img_db), uploads: $uploads — всё в бэкапе.
- Первая настройка: Global settings -> отключите публичный список опросов (для приватности).
-EOF
+    
+    # Вывод параметров подключения
+    show_connection_info "LimeSurvey" \
+        "URL: https://$SUB" \
+        "Админка: https://$SUB/index.php/admin/admin" \
+        "Логин: $admin_user" \
+        "Пароль: $admin_pass" \
+        "" \
+        "База данных: $dbtype ($img_db)" \
+        "Uploads: $uploads" \
+        "" \
+        "Первая настройка: Global settings -> отключите публичный список опросов"
+    
+    # Сохранение параметров в файл
+    log_connection_params "LimeSurvey" \
+        "URL: https://$SUB" \
+        "Админка: https://$SUB/index.php/admin/admin" \
+        "Логин: $admin_user" \
+        "Пароль: $admin_pass"
 }

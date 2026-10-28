@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 
-# Цветовые переменные (на случай, если не загружены из основного скрипта)
-c_txt=${c_txt:-$'\033[96m'}
-c_off=${c_off:-$'\033[0m'}
-
 install_mumble() {
     ensure_prepared
+    check_dependencies
     log "=== Mumble (голосовой сервер) ==="
     
     # Загружаем .env если есть
@@ -41,20 +38,6 @@ install_mumble() {
     echo "${c_txt}  2. Только TCP (если UDP порт занят другим сервисом)${c_off}"
     local protocol_choice=$(ask "Ваш выбор (1/2)" "1")
     
-    local port_flags=""
-    local protocol_desc=""
-    
-    case "$protocol_choice" in
-        2)
-            port_flags="-p 64738:64738/tcp"
-            protocol_desc="TCP only"
-            ;;
-        *)
-            port_flags="-p 64738:64738/tcp -p 64738:64738/udp"
-            protocol_desc="TCP + UDP"
-            ;;
-    esac
-    
     update_env MUMBLE_PROTOCOL "$protocol_choice"
     
     # Открываем порты в UFW
@@ -68,60 +51,60 @@ install_mumble() {
     
     ufw reload >/dev/null 2>&1 && log "UFW перезапущен" || warn "Ошибка перезапуска UFW"
     
-    # Создаём директорию для данных
+    # Создаём директорию для данных и сертификатов
     mkdir -p "$CONFIG_ROOT/data/mumble"
+    mkdir -p "$CONFIG_ROOT/config/mumble"
     
-    # Удаляем старый контейнер если есть
-    if docker ps -a | grep -q "^.*mumble$"; then
-        log "Удаляем старый контейнер mumble..."
-        docker rm -f mumble >/dev/null 2>&1 || true
+    # Копируем сертификаты для Mumble (если они есть)
+    if [[ -f "$CONFIG_ROOT/config/nginx/certs/fullchain.pem" && -f "$CONFIG_ROOT/config/nginx/certs/privkey.pem" ]]; then
+        cp "$CONFIG_ROOT/config/nginx/certs/fullchain.pem" "$CONFIG_ROOT/config/mumble/"
+        cp "$CONFIG_ROOT/config/nginx/certs/privkey.pem" "$CONFIG_ROOT/config/mumble/"
+        chmod 644 "$CONFIG_ROOT/config/mumble/fullchain.pem"
+        chmod 600 "$CONFIG_ROOT/config/mumble/privkey.pem"
+        log "SSL-сертификаты скопированы для Mumble"
+    else
+        warn "SSL-сертификаты не найдены — Mumble будет работать без TLS или с самоподписанным сертификатом"
     fi
     
-    # Запускаем контейнер Mumble напрямую на портах 64738
-    log "Запускаем Mumble в режиме $protocol_desc..."
-    docker run -d \
-        --name mumble \
-        --restart unless-stopped \
-        $port_flags \
-        -e MUMBLE_SUPERUSER_PASSWORD="$superuser_password" \
-        -e MUMBLE_CONFIG_serverpassword="$server_password" \
-        -e MUMBLE_CONFIG_welcometext="$welcome_text" \
-        -e MUMBLE_CONFIG_bandwidth="$bandwidth" \
-        -e MUMBLE_CONFIG_users="$max_users" \
-        -e MUMBLE_CONFIG_suggestpushtotalk=true \
-        -e MUMBLE_CONFIG_opusthreshold=0 \
-        -e MUMBLE_CONFIG_autobanAttempts=10 \
-        -v "$CONFIG_ROOT/data/mumble:/data" \
-        mumblevoip/mumble-server:latest
+    # Запускаем Mumble через docker compose
+    log "Запускаем Mumble через docker compose..."
+    docker compose up -d mumble
     
-    sleep 2
+    sleep 3
     
     # Проверяем, что контейнер запущен
-    if docker ps | grep -q mumble; then
+    if docker compose ps mumble | grep -q "Up"; then
         log "Mumble успешно запущен"
-        echo ""
-        echo "${c_txt}Настройки Mumble:${c_off}"
-        echo "${c_txt}  Протокол: $protocol_desc${c_off}"
-        echo "${c_txt}  Порт: 64738${c_off}"
-        echo "${c_txt}  Пароль суперпользователя: $superuser_password${c_off}"
+        
+        # Формируем параметры подключения
+        local -a conn_params=(
+            "Адрес: ${PUBLIC_IP:-<ваш-IP>}:64738"
+            "Протокол: $([ "$protocol_choice" == "1" ] && echo "TCP + UDP" || echo "TCP only")"
+            "Логин: SuperUser"
+            "Пароль: $superuser_password"
+            "Максимум пользователей: $max_users"
+        )
+        local -a log_params=(
+            "Адрес: ${PUBLIC_IP:-<ваш-IP>}:64738"
+            "Логин: SuperUser"
+            "Пароль: $superuser_password"
+        )
+        
         if [[ -n "$server_password" ]]; then
-            echo "${c_txt}  Пароль сервера: $server_password${c_off}"
+            conn_params+=("Пароль сервера: $server_password")
+            log_params+=("Пароль сервера: $server_password")
         fi
-        echo "${c_txt}  Максимум пользователей: $max_users${c_off}"
-        echo ""
-        echo "${c_txt}Подключение:${c_off}"
-        echo "${c_txt}  Адрес: <ваш-IP>:64738${c_off}"
-        echo "${c_txt}  Логин: SuperUser${c_off}"
-        echo "${c_txt}  Пароль: $superuser_password${c_off}"
         
         if [[ "$protocol_choice" == "2" ]]; then
-            echo ""
-            echo "${c_txt}⚠ Внимание: Mumble работает только по TCP.${c_off}"
-            echo "${c_txt}  Голосовая связь может работать хуже, чем по UDP.${c_off}"
+            conn_params+=("" "⚠ Внимание: Mumble работает только по TCP. Голосовая связь может работать хуже.")
         fi
+        
+        # Вывод параметров подключения
+        show_connection_info "Mumble" "${conn_params[@]}"
+        
+        # Сохранение параметров в файл
+        log_connection_params "Mumble" "${log_params[@]}"
     else
-        warn "Mumble не запустился. Проверьте логи: docker logs mumble"
+        warn "Mumble не запустился. Проверьте логи: docker compose logs mumble"
     fi
-    
-    read -rp "Enter — продолжить " _ || true
 }

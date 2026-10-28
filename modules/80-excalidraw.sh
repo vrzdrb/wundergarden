@@ -2,6 +2,7 @@
 
 install_excalidraw() {
     ensure_prepared
+    check_dependencies
     log "=== Excalidraw (доска + сохранение + комнаты) ==="
     local SUB="${SUB_EXCALIDRAW:-draw.$DOMAIN}" protected="true" collab="true" \
           storage="${EXCALIDRAW_STORAGE:-$CONFIG_ROOT/data/excalidraw}" \
@@ -56,12 +57,37 @@ SUM
     update_env SUB_EXCALIDRAW "$SUB"; update_env EXCALIDRAW_STORAGE "$storage"
     update_env EXCALIDRAW_IMAGE "$img_front"; update_env EXCALIDRAW_ROOM_IMAGE "$img_room"; update_env EXCALIDRAW_STORAGE_IMAGE "$img_storage"
     mkdir -p "$storage"
+    chown -R 1000:1000 "$storage" 2>/dev/null || true
+
+    # Проверяем доступность образов
+    log "Проверяю доступность образов..."
+    for img in "$img_front" "$img_room" "$img_storage"; do
+        if ! docker pull "$img" >/dev/null 2>&1; then
+            die "Образ $img недоступен. Проверьте имя образа и доступ к Docker Hub."
+        fi
+    done
 
     docker compose up -d excalidraw excalidraw-room excalidraw-storage
 
-    local collab_routes=""
+    # Ожидаем готовности контейнеров
+    log "Ожидание готовности Excalidraw..."
+    for i in {1..15}; do
+        if curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3001/ 2>/dev/null | grep -q "200"; then
+            log "Excalidraw готов (попытка $i/15)"
+            break
+        fi
+        sleep 2
+    done
+
     if [[ "$collab" == "true" ]]; then
-        collab_routes=$(printf '    handle /socket.io/* {\n        reverse_proxy excalidraw-room:8082\n    }\n')
+        log "Ожидание готовности Excalidraw Room..."
+        for i in {1..10}; do
+            if curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3012/ 2>/dev/null | grep -qE "200|404"; then
+                log "Excalidraw Room готов (попытка $i/10)"
+                break
+            fi
+            sleep 2
+        done
     fi
     local draw_auth=""
     if [[ "$protected" == "true" ]]; then
@@ -72,32 +98,45 @@ SUM
     fi
     add_site 45-draw "server {
     listen 8443 ssl;
+    listen [::]:8443 ssl;
     server_name $SUB;
-    ssl_certificate     /etc/nginx/certs/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_certificate     $CONFIG_ROOT/config/nginx/certs/fullchain.pem;
+    ssl_certificate_key $CONFIG_ROOT/config/nginx/certs/privkey.pem;
 ${draw_auth}    location /storage/ {
-        proxy_pass http://excalidraw-storage:8081;
-        include /etc/nginx/proxy_common.conf;
+        proxy_pass http://127.0.0.1:3013;
+        include $CONFIG_ROOT/config/nginx/proxy_common.conf;
     }
     location /socket.io/ {
-        proxy_pass http://excalidraw-room:8082;
-        include /etc/nginx/proxy_common.conf;
-        include /etc/nginx/ws_common.conf;
+        proxy_pass http://127.0.0.1:3012;
+        include $CONFIG_ROOT/config/nginx/proxy_common.conf;
+        include $CONFIG_ROOT/config/nginx/ws_common.conf;
     }
     location / {
-        proxy_pass http://excalidraw:80;
-        include /etc/nginx/proxy_common.conf;
+        proxy_pass http://127.0.0.1:3001;
+        include $CONFIG_ROOT/config/nginx/proxy_common.conf;
     }
 }"
 
-    local notes=""
-    [[ "$protected" == "true" ]] && notes=" По комнатным ссылкам потребуется пароль basicauth ($user)."
-    [[ "$collab" == "false" ]] && notes="$notes"$'\n'" Комнаты выключены (пункт 3) — Live Collaboration не подключится."
-    cat <<EOF
-
- Готово: https://$SUB
- Доски сохраняются на сервере ($storage) и экспортируются в .excalidraw/PNG/SVG.
- Live Collaboration: меню -> Start session -> ссылка ученику (нужен HTTPS, иначе ошибка generateKey).$notes
- Порты контейнеров (80/8081/8082) сверьте с basic/docker-compose.yaml репозитория alswl при смене образов.
-EOF
+    # Формируем параметры подключения
+    local -a conn_params=("URL: https://$SUB")
+    local -a log_params=("URL: https://$SUB")
+    
+    if [[ "$protected" == "true" ]]; then
+        conn_params+=("Логин: $user" "Пароль: $pass")
+        log_params+=("Логин: $user" "Пароль: $pass")
+    fi
+    
+    conn_params+=("" "Доски сохраняются на сервере: $storage" "Экспорт: .excalidraw/PNG/SVG")
+    
+    if [[ "$collab" == "true" ]]; then
+        conn_params+=("" "Live Collaboration: меню -> Start session -> ссылка ученику")
+    else
+        conn_params+=("" "⚠ Комнаты выключены — Live Collaboration не подключится")
+    fi
+    
+    # Вывод параметров подключения
+    show_connection_info "Excalidraw" "${conn_params[@]}"
+    
+    # Сохранение параметров в файл
+    log_connection_params "Excalidraw" "${log_params[@]}"
 }

@@ -2,13 +2,13 @@
 
 install_gitea() {
     ensure_prepared
+    check_dependencies
     log "=== Gitea (Git-хостинг за nginx) ==="
     local SUB="${SUB_GITEA:-git.$DOMAIN}" g_user="" g_email="" g_pass=""
     [[ -z "${GITEA_DB_PASSWORD:-}" ]] && GITEA_DB_PASSWORD="$(gen_pass)" && update_env GITEA_DB_PASSWORD "$GITEA_DB_PASSWORD"
     dns_hint "$SUB"
 
     while true; do
-        clear
         clear
         cat <<SUM
 
@@ -67,22 +67,33 @@ SUM
 
     add_site 140-gitea "server {
     listen 8443 ssl;
+    listen [::]:8443 ssl;
     server_name $SUB;
-    ssl_certificate     /etc/nginx/certs/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_certificate     $CONFIG_ROOT/config/nginx/certs/fullchain.pem;
+    ssl_certificate_key $CONFIG_ROOT/config/nginx/certs/privkey.pem;
     client_max_body_size 0;
     location / {
-        proxy_pass http://gitea:3000;
-        include /etc/nginx/proxy_common.conf;
+        proxy_pass http://127.0.0.1:3000;
+        include $CONFIG_ROOT/config/nginx/proxy_common.conf;
         proxy_read_timeout 3600s;
     }
 }"
 
-    cat <<EOF
-
- Готово: https://$SUB
- Админ создан через CLI (регистрация закрыта, INSTALL_LOCK — страница установки закрыта).
- Данные: data/gitea + data/gitea-db (в бэкапе).
- Брутфорс логина: у Gitea встроенный rate-limit; при желании добавим jail по логам nginx.
-EOF
+    # Вывод параметров подключения
+    show_connection_info "Gitea" \
+        "URL: https://$SUB" \
+        "Логин: $g_user" \
+        "Email: $g_email" \
+        "Пароль: $g_pass" \
+        "" \
+        "Регистрация закрыта (INSTALL_LOCK)" \
+        "SSH/LFS/OpenID выключены" \
+        "Данные: data/gitea + data/gitea-db (в бэкапе)"
+    
+    # Сохранение параметров в файл
+    log_connection_params "Gitea" \
+        "URL: https://$SUB" \
+        "Логин: $g_user" \
+        "Email: $g_email" \
+        "Пароль: $g_pass"
 }

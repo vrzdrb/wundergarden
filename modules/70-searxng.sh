@@ -2,6 +2,7 @@
 
 install_searxng() {
     ensure_prepared
+    check_dependencies
     log "=== SearXNG ==="
     SUB_SEARCH="$(ask "Поддомен для поиска" "${SUB_SEARCH:-search.$DOMAIN}")"; update_env SUB_SEARCH "$SUB_SEARCH"
     dns_hint "$SUB_SEARCH"
@@ -118,6 +119,13 @@ ENG
     [[ "$access" == "private" ]] && mk_htpasswd search "$auth_user" "$auth_pw"
     local limiter="false"; [[ "$access" == "public" ]] && limiter="true"
 
+    # Проверяем наличие SEARXNG_SECRET
+    if [[ -z "${SEARXNG_SECRET:-}" ]]; then
+        SEARXNG_SECRET="$(gen_pass)"
+        update_env SEARXNG_SECRET "$SEARXNG_SECRET"
+        log "Сгенерирован SEARXNG_SECRET"
+    fi
+
     local uds="use_default_settings: true" e
     if [[ "$engines_mode" == "custom" ]]; then
         uds="use_default_settings:"$'\n'"  engines:"$'\n'"    keep_only:"
@@ -134,6 +142,19 @@ ENG
     [[ -n "$plugins_yaml" ]] && plugins_yaml="plugins:"$'\n'"$plugins_yaml"
 
     mkdir -p "$DATA_DIR/searxng"
+    chown -R 1000:1000 "$DATA_DIR/searxng" 2>/dev/null || true
+
+    # Предупреждаем о потенциально заблокированных движках
+    if [[ "$engines_mode" == "custom" ]]; then
+        local blocked_engines=("google" "bing" "duckduckgo" "brave" "startpage")
+        while IFS= read -r eng; do
+            [[ -z "$eng" ]] && continue
+            if [[ " ${blocked_engines[@]} " =~ " ${eng} " ]]; then
+                warn "Движок '$eng' может быть заблокирован в вашем регионе"
+            fi
+        done <<< "$engines_list"
+    fi
+
     cat > "$DATA_DIR/searxng/settings.yml" <<EOF
 $uds
 general:
@@ -161,17 +182,43 @@ outgoing:
 EOF
 
     docker compose up -d searxng
+
+    # Ожидаем готовности SearXNG
+    log "Ожидание готовности SearXNG..."
+    for i in {1..20}; do
+        if curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8888/ 2>/dev/null | grep -q "200"; then
+            log "SearXNG готов (попытка $i/20)"
+            break
+        fi
+        sleep 2
+    done
+
     local search_auth=""
     [[ "$access" == "private" ]] && search_auth=$(auth_conf search "Search")
     add_site 40-search "server {
     listen 8443 ssl;
+    listen [::]:8443 ssl;
     server_name $SUB_SEARCH;
-    ssl_certificate     /etc/nginx/certs/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_certificate     $CONFIG_ROOT/config/nginx/certs/fullchain.pem;
+    ssl_certificate_key $CONFIG_ROOT/config/nginx/certs/privkey.pem;
 ${search_auth}    location / {
-        proxy_pass http://searxng:8080;
-        include /etc/nginx/proxy_common.conf;
+        proxy_pass http://127.0.0.1:8888;
+        include $CONFIG_ROOT/config/nginx/proxy_common.conf;
     }
 }"
-    log "Готово: https://$SUB_SEARCH"
+    
+    # Формируем параметры подключения
+    local -a conn_params=("URL: https://$SUB_SEARCH")
+    local -a log_params=("URL: https://$SUB_SEARCH")
+    
+    if [[ "$access" == "private" ]]; then
+        conn_params+=("Логин: $auth_user" "Пароль: $auth_pw")
+        log_params+=("Логин: $auth_user" "Пароль: $auth_pw")
+    fi
+    
+    # Вывод параметров подключения
+    show_connection_info "SearXNG" "${conn_params[@]}"
+    
+    # Сохранение параметров в файл
+    log_connection_params "SearXNG" "${log_params[@]}"
 }

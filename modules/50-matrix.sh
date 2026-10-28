@@ -2,6 +2,7 @@
 
 install_matrix() {
     ensure_prepared
+    check_dependencies
     log "=== Matrix (continuwuity) + TURN/STUN (coturn) ==="
     SUB_MATRIX="$(ask "Поддомен для Matrix" "${SUB_MATRIX:-matrix.$DOMAIN}")"; update_env SUB_MATRIX "$SUB_MATRIX"
     SUB_TURN="$(ask "Поддомен для TURN/STUN" "${SUB_TURN:-turn.$DOMAIN}")"; update_env SUB_TURN "$SUB_TURN"
@@ -15,6 +16,13 @@ install_matrix() {
         [[ -z "$pub_ip" ]] && warn "IP обязателен — без него coturn будет рекламировать клиентам неверный адрес."
     done
     update_env PUBLIC_IP "$pub_ip"
+
+    # Открываем порты Coturn в UFW
+    require_cmd ufw ufw
+    ufw allow 3478/tcp comment 'Coturn STUN/TURN' >/dev/null 2>&1 && log "UFW: порт 3478/tcp открыт" || warn "Ошибка UFW"
+    ufw allow 3478/udp comment 'Coturn STUN/TURN' >/dev/null 2>&1 && log "UFW: порт 3478/udp открыт" || warn "Ошибка UFW"
+    ufw allow 5349/tcp comment 'Coturn TURNS' >/dev/null 2>&1 && log "UFW: порт 5349/tcp открыт" || warn "Ошибка UFW"
+    ufw reload >/dev/null 2>&1 || true
 
     local desc="" reg_mode="closed" reg_token="${REGISTRATION_TOKEN:-}" suspend_new="false" \
           e2ee="true" suffix_mode="flag" suffix_custom="" block_invites="false" \
@@ -161,23 +169,33 @@ EOF
     sleep 5
     add_site 50-matrix "server {
     listen 8443 ssl;
+    listen [::]:8443 ssl;
     server_name $SUB_MATRIX;
-    ssl_certificate     /etc/nginx/certs/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_certificate     $CONFIG_ROOT/config/nginx/certs/fullchain.pem;
+    ssl_certificate_key $CONFIG_ROOT/config/nginx/certs/privkey.pem;
     client_max_body_size 100m;
     location / {
-        proxy_pass http://matrix:8008;
-        include /etc/nginx/proxy_common.conf;
+        proxy_pass http://127.0.0.1:8008;
+        include $CONFIG_ROOT/config/nginx/proxy_common.conf;
     }
 }"
-    cat <<EOF
-
- Готово.
- Matrix: https://$SUB_MATRIX
- Первый пользователь (станет админом): docker compose logs matrix | grep -i token
-   -> токен -> регистрация в клиенте; либо: docker compose exec matrix continuwuity --execute "users create_user <имя>"
- Регистрация: $reg_descr
- TURN/STUN: turn:$SUB_TURN:3478 (udp+tcp) — пробросьте 3478 и 49152-65535/udp на роутере -> $pub_ip
- Проверка: curl "https://$SUB_MATRIX/_matrix/client/v3/voip/turnServer" -H "Authorization: Bearer <токен клиента>"
-EOF
+    
+    # Вывод параметров подключения
+    show_connection_info "Matrix (continuwuity)" \
+        "URL сервера: https://$SUB_MATRIX" \
+        "Регистрация: $reg_descr" \
+        "" \
+        "Получение первого пользователя (станет админом):" \
+        "  docker compose logs matrix | grep -i token" \
+        "  -> токен -> регистрация в клиенте" \
+        "  Либо: docker compose exec matrix continuwuity --execute \"users create_user <имя>\"" \
+        "" \
+        "TURN/STUN: turn:$SUB_TURN:3478 (udp+tcp)" \
+        "Порты 3478 и 5349 открыты в UFW"
+    
+    # Сохранение параметров в файл
+    log_connection_params "Matrix" \
+        "URL: https://$SUB_MATRIX" \
+        "Регистрация: $reg_descr" \
+        "TURN: turn:$SUB_TURN:3478"
 }

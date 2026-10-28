@@ -2,6 +2,7 @@
 
 install_couchdb() {
     ensure_prepared
+    check_dependencies
     log "=== CouchDB (Obsidian LiveSync) ==="
     local fresh="true" new_pass=""
     if [[ -d "$DATA_DIR/couchdb" && -n "$(ls -A "$DATA_DIR/couchdb" 2>/dev/null)" ]]; then fresh="false"; fi
@@ -81,13 +82,13 @@ max_age = 3600
 EOF
 
     docker compose up -d couchdb
-    log "Жду healthcheck CouchDB..."
+    log "Жду healthcheck CouchDB (до 180 секунд)..."
     local status=""
-    for _ in $(seq 1 45); do
+    for _ in $(seq 1 90); do
         status=$(docker inspect --format '{{.State.Health.Status}}' homeserver-couchdb-1 2>/dev/null || echo starting)
         [[ "$status" == "healthy" ]] && break; sleep 2
     done
-    [[ "$status" == "healthy" ]] || die "CouchDB не поднялся: docker compose logs couchdb"
+    [[ "$status" == "healthy" ]] || die "CouchDB не поднялся за 180 секунд: docker compose logs couchdb"
 
     for db in _users _replicator "$dbname"; do
         code=$(docker compose exec -T couchdb curl -s -o /dev/null -w '%{http_code}' \
@@ -105,21 +106,37 @@ EOF
 
     add_site 10-obsidian "server {
     listen 8443 ssl;
+    listen [::]:8443 ssl;
     server_name $SUB_OBSIDIAN;
-    ssl_certificate     /etc/nginx/certs/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_certificate     $CONFIG_ROOT/config/nginx/certs/fullchain.pem;
+    ssl_certificate_key $CONFIG_ROOT/config/nginx/certs/privkey.pem;
     client_max_body_size 4096m;
     location / {
-        proxy_pass http://couchdb:5984;
-        include /etc/nginx/proxy_common.conf;
+        proxy_pass http://127.0.0.1:5984;
+        include $CONFIG_ROOT/config/nginx/proxy_common.conf;
     }
 }"
-    cat <<EOF
-
- Готово: https://$SUB_OBSIDIAN
- В плагине Self-hosted LiveSync на каждом устройстве:
-   URL: https://$SUB_OBSIDIAN | база: $dbname | логин: $COUCHDB_USER | пароль: см. .env
-   E2E-пароль задайте свой, одинаковый на всех устройствах.
- Веб-админка Fauxton: https://$SUB_OBSIDIAN/_utils (те же учётные данные).
-EOF
+    
+    # Вывод параметров подключения
+    show_connection_info "CouchDB (Obsidian LiveSync)" \
+        "URL: https://$SUB_OBSIDIAN" \
+        "База данных: $dbname" \
+        "Логин: $COUCHDB_USER" \
+        "Пароль: $COUCHDB_PASSWORD" \
+        "Веб-админка Fauxton: https://$SUB_OBSIDIAN/_utils" \
+        "" \
+        "В плагине Self-hosted LiveSync на каждом устройстве:" \
+        "  URL: https://$SUB_OBSIDIAN" \
+        "  База: $dbname" \
+        "  Логин: $COUCHDB_USER" \
+        "  Пароль: $COUCHDB_PASSWORD" \
+        "  E2E-пароль задайте свой, одинаковый на всех устройствах."
+    
+    # Сохранение параметров в файл
+    log_connection_params "CouchDB" \
+        "URL: https://$SUB_OBSIDIAN" \
+        "База: $dbname" \
+        "Логин: $COUCHDB_USER" \
+        "Пароль: $COUCHDB_PASSWORD" \
+        "Админка: https://$SUB_OBSIDIAN/_utils"
 }

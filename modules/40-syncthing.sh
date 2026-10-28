@@ -2,6 +2,7 @@
 
 install_syncthing() {
     ensure_prepared
+    check_dependencies
     log "=== Syncthing ==="
     local gui_mode="local" gui_user="${SYNCTHING_GUI_AUTH:-admin:changeme}" gui_pass="" \
           devname="$(hostname)" syncdir="${SYNCTHING_SYNC_DIR:-$CONFIG_ROOT/data/syncthing/sync}" SUB_SYNC="${SUB_SYNC:-sync.$DOMAIN}" \
@@ -62,12 +63,38 @@ SUM
     mkdir -p "$syncdir" "$DATA_DIR/syncthing"
     chown -R 1000:1000 "$syncdir" "$DATA_DIR/syncthing" 2>/dev/null || true
 
+    # Открываем порты синхронизации в UFW
+    require_cmd ufw ufw
+    ufw allow 22000/tcp comment 'Syncthing sync' >/dev/null 2>&1 && log "UFW: порт 22000/tcp открыт" || warn "Ошибка UFW"
+    ufw allow 22000/udp comment 'Syncthing sync' >/dev/null 2>&1 && log "UFW: порт 22000/udp открыт" || warn "Ошибка UFW"
+    ufw allow 21027/udp comment 'Syncthing discovery' >/dev/null 2>&1 && log "UFW: порт 21027/udp открыт" || warn "Ошибка UFW"
+    ufw reload >/dev/null 2>&1 || true
+
     docker compose up -d syncthing
-    sleep 6
+    
+    # Ожидание инициализации Syncthing (до 30 секунд)
+    log "Ожидание инициализации Syncthing..."
+    for i in {1..15}; do
+        if [[ -f "$DATA_DIR/syncthing/config.xml" ]]; then
+            log "config.xml найден (попытка $i/15)"
+            break
+        fi
+        sleep 2
+    done
 
     local key devid
     key=$(grep -oPm1 '(?<=<apikey>)[^<]+' "$DATA_DIR/syncthing/config.xml" 2>/dev/null || true)
     if [[ -n "$key" ]]; then
+        # Ждём готовности API (до 20 секунд)
+        log "Ожидание готовности API Syncthing..."
+        for i in {1..10}; do
+            if curl -s -m 2 -H "X-API-Key: $key" http://127.0.0.1:8384/rest/system/version >/dev/null 2>&1; then
+                log "API готов (попытка $i/10)"
+                break
+            fi
+            sleep 2
+        done
+        
         devid=$(curl -s -m 5 -H "X-API-Key: $key" http://127.0.0.1:8384/rest/config/devices \
                 | grep -oE '[A-Z0-9]{7}(-[A-Z0-9]{7}){7}' | head -1)
         if [[ -n "$devid" ]]; then
@@ -78,7 +105,7 @@ SUM
             warn "Device ID не получен — имя задайте в GUI."
         fi
     else
-        warn "config.xml ещё не создан — имя устройства задайте в GUI при первом входе."
+        warn "API key не получен — настройте имя устройства вручную в GUI"
     fi
 
     if [[ -n "$key" ]]; then
@@ -96,25 +123,62 @@ SUM
         mk_htpasswd sync "$gui_user" "$gui_pass"
         add_site 60-sync "server {
     listen 8443 ssl;
+    listen [::]:8443 ssl;
     server_name $SUB_SYNC;
-    ssl_certificate     /etc/nginx/certs/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_certificate     $CONFIG_ROOT/config/nginx/certs/fullchain.pem;
+    ssl_certificate_key $CONFIG_ROOT/config/nginx/certs/privkey.pem;
 $(auth_conf sync "Syncthing GUI")
     location / {
-        proxy_pass http://syncthing:8384;
-        include /etc/nginx/proxy_common.conf;
+        proxy_pass http://127.0.0.1:8384;
+        include $CONFIG_ROOT/config/nginx/proxy_common.conf;
     }
 }"
     else
         rm -f "$CONFIG_ROOT/config/nginx/conf.d/60-sync.conf"; reload_nginx
     fi
 
-    cat <<EOF
-
- Готово.
- GUI: $([[ "$gui_mode" == "public" ]] && echo "https://$SUB_SYNC (basicauth '$gui_user' + пароль GUI)" || echo "ssh -L 8384:localhost:8384 user@$DOMAIN -> http://localhost:8384")
- Пароль GUI: $gui_pass (.env: SYNCTHING_GUI_AUTH)
- Папка синхронизации: $syncdir (внутри контейнера /var/syncthing/Sync)
- Синхронизация: порты 22000 tcp/udp + 21027/udp открыты; в GUI: Add Remote Device -> обмен ID -> выбрать папку.
-EOF
+    # Вывод параметров подключения
+    if [[ "$gui_mode" == "public" ]]; then
+        show_connection_info "Syncthing" \
+            "GUI (публичный доступ):" \
+            "  URL: https://$SUB_SYNC" \
+            "  Логин: $gui_user" \
+            "  Пароль: $gui_pass" \
+            "" \
+            "Папка синхронизации: $syncdir" \
+            "Порты: 22000 tcp/udp + 21027/udp (открыты в UFW)" \
+            "" \
+            "Для синхронизации с другими устройствами:" \
+            "  1. Откройте GUI" \
+            "  2. Add Remote Device -> обмен Device ID" \
+            "  3. Выберите папку для синхронизации"
+        
+        log_connection_params "Syncthing" \
+            "GUI URL: https://$SUB_SYNC" \
+            "Логин: $gui_user" \
+            "Пароль: $gui_pass" \
+            "Папка: $syncdir"
+    else
+        show_connection_info "Syncthing" \
+            "GUI (через SSH-туннель):" \
+            "  1. Откройте терминал на своём компьютере" \
+            "  2. Выполните: ssh -L 8384:localhost:8384 user@$DOMAIN" \
+            "  3. Откройте в браузере: http://localhost:8384" \
+            "  4. Логин: $gui_user" \
+            "  5. Пароль: $gui_pass" \
+            "" \
+            "Папка синхронизации: $syncdir" \
+            "Порты: 22000 tcp/udp + 21027/udp (открыты в UFW)" \
+            "" \
+            "Для синхронизации с другими устройствами:" \
+            "  1. Откройте GUI через SSH-туннель" \
+            "  2. Add Remote Device -> обмен Device ID" \
+            "  3. Выберите папку для синхронизации"
+        
+        log_connection_params "Syncthing" \
+            "GUI: ssh -L 8384:localhost:8384 user@$DOMAIN -> http://localhost:8384" \
+            "Логин: $gui_user" \
+            "Пароль: $gui_pass" \
+            "Папка: $syncdir"
+    fi
 }

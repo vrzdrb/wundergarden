@@ -2,6 +2,7 @@
 
 install_radicale() {
     ensure_prepared
+    check_dependencies
     log "=== Radicale (CalDAV) ==="
     local auth_type="htpasswd" rights="owner_only" level="INFO" ruser="" rpass=""
 
@@ -9,7 +10,6 @@ install_radicale() {
     update_env SUB_CAL "$SUB_CAL"; dns_hint "$SUB_CAL"
 
     while true; do
-        clear
         clear
         cat <<SUM
 
@@ -57,8 +57,9 @@ SUM
         esac
     done
 
-    [[ "$auth_type" == "htpasswd" && -z "$ruser" ]] && \
-        warn "пользователь не создан (пункт 3) — htpasswd-файл пуст, вход не сработает."
+    if [[ "$auth_type" == "htpasswd" && -z "$ruser" ]]; then
+        die "Пользователь не создан! Вернитесь в меню и выполните пункт 3."
+    fi
 
     mkdir -p "$CONFIG_ROOT/config/radicale" "$DATA_DIR/radicale"
     cat > "$CONFIG_ROOT/config/radicale/config" <<EOF
@@ -84,24 +85,41 @@ EOF
     docker compose up -d radicale
     add_site 20-cal "server {
     listen 8443 ssl;
+    listen [::]:8443 ssl;
     server_name $SUB_CAL;
-    ssl_certificate     /etc/nginx/certs/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_certificate     $CONFIG_ROOT/config/nginx/certs/fullchain.pem;
+    ssl_certificate_key $CONFIG_ROOT/config/nginx/certs/privkey.pem;
     client_max_body_size 50m;
     location / {
-        proxy_pass http://radicale:5232;
-        include /etc/nginx/proxy_common.conf;
+        proxy_pass http://127.0.0.1:5232;
+        include $CONFIG_ROOT/config/nginx/proxy_common.conf;
     }
 }"
     local code=""
     code=$(curl -s -o /dev/null -w '%{http_code}' -m 10 ${ruser:+-u "$ruser:$rpass"} "https://$SUB_CAL/" 2>/dev/null || true)
     [[ -n "$code" && "$code" != "000" ]] && log "Проверка по https://$SUB_CAL/ — HTTP $code" \
         || warn "Проверка не прошла (DNS/сертификат ещё не готовы?) — проверьте позже: curl -u $ruser https://$SUB_CAL/"
-    cat <<EOF
-
- Готово: https://$SUB_CAL
- Fossify Calendar: DAV-аккаунт -> URL https://$SUB_CAL/$ruser/
- calcurse: ~/.config/calcurse/caldav/config -> https://$SUB_CAL, путь /$ruser/<id>.ics
- Веб-интерфейс Radicale: https://$SUB_CAL
-EOF
+    
+    # Вывод параметров подключения
+    show_connection_info "Radicale (CalDAV/CardDAV)" \
+        "URL: https://$SUB_CAL" \
+        "Логин: $ruser" \
+        "Пароль: $rpass" \
+        "" \
+        "Для Fossify Calendar / DAVx⁵:" \
+        "  URL: https://$SUB_CAL/$ruser/" \
+        "  Логин: $ruser" \
+        "  Пароль: $rpass" \
+        "" \
+        "Для calcurse (~/.config/calcurse/caldav/config):" \
+        "  URL: https://$SUB_CAL" \
+        "  Путь: /$ruser/<id>.ics" \
+        "" \
+        "Веб-интерфейс: https://$SUB_CAL"
+    
+    # Сохранение параметров в файл
+    log_connection_params "Radicale" \
+        "URL: https://$SUB_CAL" \
+        "Логин: $ruser" \
+        "Пароль: $rpass"
 }

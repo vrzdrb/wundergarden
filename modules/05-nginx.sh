@@ -1,46 +1,191 @@
 #!/usr/bin/env bash
 
+NGINX_CONF="/etc/nginx/nginx.conf"
+NGINX_CONFIG_DIR="$CONFIG_ROOT/config/nginx"
+
 hsts_line_enable() {
-    local f="$CONFIG_ROOT/config/nginx/nginx.conf"
-    [[ -f "$f" ]] || return 0
-    sed -i '/Strict-Transport-Security/d' "$f"
+    [[ -f "$NGINX_CONF" ]] || return 0
+    sed -i '/Strict-Transport-Security/d' "$NGINX_CONF"
     if [[ "${HSTS_ENABLED:-false}" == "true" ]]; then
-        sed -i 's|^    add_header Referrer-Policy strict-origin-when-cross-origin always;$|&\n    add_header Strict-Transport-Security "max-age=31536000" always;|' "$f"
+        sed -i 's|^    add_header Referrer-Policy strict-origin-when-cross-origin always;$|&\n    add_header Strict-Transport-Security "max-age=31536000" always;|' "$NGINX_CONF"
     fi
 }
 
 reload_nginx() {
-    if docker ps --format '{{.Names}}' | grep -qx homeserver-nginx-1; then
-        docker compose exec -T nginx nginx -s reload \
+    if systemctl is-active --quiet nginx; then
+        nginx -t 2>/dev/null && systemctl reload nginx \
             && log "nginx перечитал конфигурацию." \
-            || warn "reload не прошёл — проверьте конфиг: docker compose logs nginx (или L в меню сервиса)"
+            || warn "reload не прошёл — проверьте конфиг: journalctl -u nginx"
     else
-        warn "nginx не запущен (пункт 3) — конфиг сохранён, применится при запуске."
+        warn "nginx не запущен — сначала установите (пункт 1 в подменю)."
     fi
 }
 
+install_nginx_host() {
+    if command -v nginx >/dev/null 2>&1 && systemctl is-active --quiet nginx; then
+        log "nginx уже установлен: $(nginx -v 2>&1)"
+        return 0
+    fi
+    
+    log "Устанавливаю nginx-full из репозитория Debian..."
+    apt-get update -qq
+    apt-get install -y -qq nginx-full
+    
+    # Проверяем наличие нужных модулей
+    if nginx -V 2>&1 | grep -q 'with-stream'; then
+        log "Модуль stream: присутствует"
+    else
+        die "nginx собран без модуля stream"
+    fi
+    if nginx -V 2>&1 | grep -q 'with-stream_ssl_preread_module'; then
+        log "Модуль stream_ssl_preread: присутствует"
+    else
+        die "nginx собран без модуля stream_ssl_preread"
+    fi
+    
+    # Создаём директории
+    mkdir -p "$NGINX_CONFIG_DIR"/{conf.d,stream.d,htpasswd,certs}
+    mkdir -p /var/log/nginx
+    
+    # Генерируем nginx.conf
+    cat > "$NGINX_CONF" <<NGXEOF
+user www-data;
+worker_processes auto;
+pid /run/nginx.pid;
+include /etc/nginx/modules-enabled/*.conf;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    sendfile on;
+    server_tokens off;
+    client_max_body_size 512m;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    limit_req_zone \$binary_remote_addr zone=perip:10m rate=10r/s;
+    limit_conn_zone \$binary_remote_addr zone=addr:10m;
+
+    client_body_timeout 10s;
+    client_header_timeout 10s;
+    send_timeout 10s;
+    keepalive_requests 1000;
+
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+
+    access_log /var/log/nginx/access.log;
+    error_log /var/log/nginx/error.log warn;
+
+    server {
+        listen 80 default_server;
+        listen [::]:80 default_server;
+        return 301 https://\$host\$request_uri;
+    }
+
+    server {
+        listen 8443 ssl default_server;
+        listen [::]:8443 ssl default_server;
+        ssl_certificate     $NGINX_CONFIG_DIR/certs/fullchain.pem;
+        ssl_certificate_key $NGINX_CONFIG_DIR/certs/privkey.pem;
+        return 444;
+    }
+
+    include $NGINX_CONFIG_DIR/conf.d/*.conf;
+}
+
+stream {
+    error_log /var/log/nginx/stream-error.log;
+    include $NGINX_CONFIG_DIR/stream.d/*.conf;
+
+    server {
+        listen 443;
+        listen [::]:443;
+        proxy_pass \$stream_upstream;
+        ssl_preread on;
+    }
+}
+NGXEOF
+    
+    # Создаём базовые include-файлы
+    cat > "$NGINX_CONFIG_DIR/proxy_common.conf" <<'NGXEOF'
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_read_timeout 3600s;
+proxy_hide_header Server;
+proxy_hide_header X-Powered-By;
+limit_req zone=perip burst=100 nodelay;
+limit_conn addr 20;
+NGXEOF
+
+    cat > "$NGINX_CONFIG_DIR/ws_common.conf" <<'NGXEOF'
+proxy_http_version 1.1;
+proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Connection "upgrade";
+NGXEOF
+
+    # Базовый stream-маппинг (заполняется через меню)
+    cat > "$NGINX_CONFIG_DIR/stream.d/00-map.conf" <<'NGXEOF'
+map $ssl_preread_server_name $stream_upstream {
+    default web_tls;
+}
+upstream web_tls { server 127.0.0.1:8443; }
+NGXEOF
+    
+    # Права на директории
+    chown -R root:www-data "$NGINX_CONFIG_DIR"
+    chmod 750 "$NGINX_CONFIG_DIR/certs"
+    
+    # UFW
+    if command -v ufw >/dev/null 2>&1; then
+        ufw allow 80/tcp comment 'nginx HTTP' >/dev/null 2>&1 || true
+        ufw allow 443/tcp comment 'nginx HTTPS' >/dev/null 2>&1 || true
+        ufw reload >/dev/null 2>&1 || true
+        log "UFW: порты 80/tcp и 443/tcp открыты"
+    fi
+    
+    # Тест конфига и запуск
+    nginx -t 2>&1 || die "nginx: ошибка в конфигурации"
+    systemctl enable --now nginx
+    log "nginx установлен и запущен: $(nginx -v 2>&1)"
+    
+    read -rp "Enter — продолжить " _ || true
+}
+
 add_site() {
-    local f="$CONFIG_ROOT/config/nginx/conf.d/$1.conf"
+    local f="$NGINX_CONFIG_DIR/conf.d/$1.conf"
     printf '%s\n' "$2" > "$f"
     if [[ "$(tail -n 1 "$f")" == "}" ]]; then
         sed -i '$d' "$f"
-        printf '    location ~ /\\.(?!well-known) { deny all; }\n}\n' >> "$f"
+        printf '    location ~ /\.(?!well-known) { deny all; }\n}\n' >> "$f"
     fi
     reload_nginx
 }
 
 add_stream() {
-    printf '%s\n' "$2" > "$CONFIG_ROOT/config/nginx/stream.d/$1.conf"; reload_nginx
+    printf '%s\n' "$2" > "$NGINX_CONFIG_DIR/stream.d/$1.conf"; reload_nginx
 }
 
 mk_htpasswd() {
-    mkdir -p "$CONFIG_ROOT/config/nginx/htpasswd"
-    printf '%s:%s\n' "$2" "$(openssl passwd -apr1 "$3")" > "$CONFIG_ROOT/config/nginx/htpasswd/$1"
-    chmod 640 "$CONFIG_ROOT/config/nginx/htpasswd/$1" || true
+    mkdir -p "$NGINX_CONFIG_DIR/htpasswd"
+    printf '%s:%s\n' "$2" "$(openssl passwd -apr1 "$3")" > "$NGINX_CONFIG_DIR/htpasswd/$1"
+    chmod 640 "$NGINX_CONFIG_DIR/htpasswd/$1" || true
 }
 
 auth_conf() {
-    printf '        auth_basic "%s";\n        auth_basic_user_file /etc/nginx/htpasswd/%s;\n' "$2" "$1"
+    printf '        auth_basic "%s";\n        auth_basic_user_file %s/htpasswd/%s;\n' "$2" "$NGINX_CONFIG_DIR" "$1"
 }
 
 dns_hint() {
@@ -50,44 +195,51 @@ dns_hint() {
 }
 
 front_nginx_menu() {
-    ensure_prepared
     while true; do
-        local st; st=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -qx homeserver-nginx-1 && echo "запущен" || echo "не запущен")
+        local st; st=$(systemctl is-active nginx 2>/dev/null || echo "не установлен")
+        [[ "$st" == "active" ]] && st="запущен" || st="не запущен"
         clear
         cat <<SUM
 
 ${c_mag} --- nginx и сертификаты: $st ---${c_off}
-  ${c_num}1.${c_off} ${c_txt}Сертификаты — делать ПЕРВЫМ${c_off}
-  ${c_num}2.${c_off} ${c_txt}Запустить / перезапустить nginx${c_off}
-  ${c_num}3.${c_off} ${c_txt}Stream-passthrough домены: ${STREAM_DOMAINS:-нет}${c_off}
-  ${c_num}4.${c_off} ${c_txt}Показать полный текущий конфиг${c_off}
-  ${c_num}5.${c_off} ${c_txt}HSTS: $(onoff "${HSTS_ENABLED:-false}")${c_off}
-  ${c_num}6.${c_off} ${c_txt}Перечитать конфигурацию${c_off}
+  ${c_num}1.${c_off} ${c_txt}Установить nginx на хост${c_off}
+  ${c_num}2.${c_off} ${c_txt}Сертификаты — делать ПОСЛЕ установки nginx${c_off}
+  ${c_num}3.${c_off} ${c_txt}Перезапустить nginx${c_off}
+  ${c_num}4.${c_off} ${c_txt}Stream-passthrough домены: ${STREAM_DOMAINS:-нет}${c_off}
+  ${c_num}5.${c_off} ${c_txt}Показать полный текущий конфиг${c_off}
+  ${c_num}6.${c_off} ${c_txt}HSTS: $(onoff "${HSTS_ENABLED:-false}")${c_off}
+  ${c_num}7.${c_off} ${c_txt}Перечитать конфигурацию${c_off}
   ${c_txt}Порты: 80, 443${c_off}
 
   ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
-        read -rp "$(_t PROMPT_NGINX)" c || true
+        read -rp "Выбор: " c || true
         case "$c" in
-            1) certs_menu ;;
-            2)
+            1) install_nginx_host ;;
+            2) certs_menu ;;
+            3)
+                if ! command -v nginx >/dev/null 2>&1; then
+                    warn "nginx не установлен — сначала пункт 1."
+                    read -rp "Enter — продолжить " _ || true
+                    continue
+                fi
                 if ss -tln | grep -qE ':(80|443)\s'; then
                     ss -tlnp | grep -E ':(80|443)\s' >&2 || true
                     warn "часть портов занята (см. выше) — продолжаем."
                 fi
-                [[ -f "$CONFIG_ROOT/config/nginx/certs/fullchain.pem" ]] \
-                    || warn "сертификаты не найдены — сначала пункт 1."
-                docker compose up -d nginx
-                sleep 2
-                if docker compose exec -T nginx nginx -V 2>&1 | grep -q stream_ssl_preread; then
-                    log "stream_ssl_preread: поддерживается."
+                [[ -f "$NGINX_CONFIG_DIR/certs/fullchain.pem" ]] \
+                    || warn "сертификаты не найдены — сначала пункт 2."
+                systemctl restart nginx
+                sleep 1
+                if systemctl is-active --quiet nginx; then
+                    log "nginx перезапущен"
                 else
-                    warn "образ nginx без stream_ssl_preread — SNI-роутинг не заработает; нужен образ, собранный с --with-stream_ssl_preread_module."
+                    warn "nginx не запустился — journalctl -u nginx"
                 fi
-                reload_nginx ;;
-            3)
-                echo "${c_txt}Домены, TLS которых должен проходить насквозь (SNI -> loopback-порт внешнего терминатора).${c_off}"
-                echo "${c_txt}Формат записи: домен:порт (через запятую). Терминатор слушает на loopback хоста.${c_off}"
+                ;;
+            4)
+                echo "${c_txt}Домены, TLS которых должен проходить насквозь (SNI -> loopback-порт).${c_off}"
+                echo "${c_txt}Формат записи: домен:порт (через запятую).${c_off}"
                 echo "${c_txt}Текущий список: ${STREAM_DOMAINS:-пусто}${c_off}"
                 local lst; lst="$(ask "Новый список (пусто — очистить)" "${STREAM_DOMAINS:-}")"
                 lst="${lst// /}"
@@ -103,7 +255,7 @@ SUM
                 done; unset IFS
                 lst="$entry_clean"; update_env STREAM_DOMAINS "$lst"
                 {
-                    echo "${c_txt}map \$ssl_preread_server_name \$stream_upstream {${c_off}"
+                    echo "map \$ssl_preread_server_name \$stream_upstream {"
                     local entry d p
                     IFS=','; for entry in $lst; do
                         [[ -z "$entry" ]] && continue
@@ -111,36 +263,29 @@ SUM
                         [[ "$p" == "$d" ]] && p="8444"
                         printf '    %-40s host_passthrough_%s;\n' "$d" "$p"
                     done; unset IFS
-                    echo "${c_txt}    default web_tls;${c_off}"
-                    echo "${c_txt}}${c_off}"
-                    echo "${c_txt}upstream web_tls { server 127.0.0.1:8443; }${c_off}"
+                    echo "    default web_tls;"
+                    echo "}"
+                    echo "upstream web_tls { server 127.0.0.1:8443; }"
                     IFS=','; for entry in $lst; do
                         [[ -z "$entry" ]] && continue
                         p="${entry##*:}"; [[ "$p" == "$entry" ]] && p="8444"
-                        printf 'upstream host_passthrough_%s { server host.docker.internal:%s; }\n' "$p" "$p"
+                        printf 'upstream host_passthrough_%s { server 127.0.0.1:%s; }\n' "$p" "$p"
                     done; unset IFS
-                } > "$CONFIG_ROOT/config/nginx/stream.d/00-map.conf"
+                } > "$NGINX_CONFIG_DIR/stream.d/00-map.conf"
                 reload_nginx
                 log "00-map.conf пересобран: ${STREAM_DOMAINS:-(пусто)}." ;;
-            4)
-                # Проверяем состояние контейнера
-                local container_state=$(docker inspect --format='{{.State.Status}}' homeserver-nginx-1 2>/dev/null || echo "not_found")
-                
-                if [[ "$container_state" == "running" ]]; then
-                    if command -v less >/dev/null 2>&1; then
-                        docker compose exec -T nginx nginx -T 2>&1 | less
-                    else
-                        docker compose exec -T nginx nginx -T 2>&1
-                    fi
-                elif [[ "$container_state" == "restarting" ]]; then
-                    warn "nginx находится в состоянии перезапуска."
-                    echo "${c_txt}Подождите несколько секунд или проверьте логи:${c_off}"
-                    echo "${c_txt}  docker compose logs nginx${c_off}"
-                else
-                    warn "nginx не запущен — сначала действие 2."
-                fi
-                read -rp "$(_t BACK)" _ || true ;;
             5)
+                if command -v nginx >/dev/null 2>&1; then
+                    if command -v less >/dev/null 2>&1; then
+                        nginx -T 2>&1 | less
+                    else
+                        nginx -T 2>&1
+                    fi
+                else
+                    warn "nginx не установлен"
+                fi
+                read -rp "Enter — продолжить " _ || true ;;
+            6)
                 if [[ "${HSTS_ENABLED:-false}" == "true" ]]; then
                     HSTS_ENABLED="false"
                 else
@@ -152,7 +297,7 @@ SUM
                 hsts_line_enable
                 reload_nginx
                 log "HSTS: $(onoff "$HSTS_ENABLED")" ;;
-            6) reload_nginx ;;
+            7) reload_nginx ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
         esac
@@ -162,10 +307,8 @@ SUM
 certs_menu() {
     log "=== Сертификаты (acme.sh, wildcard через DNS-01) ==="
     
-    # Загружаем .env если есть
     [[ -f "$ENV_FILE" ]] && load_env
     
-    # Проверяем наличие DOMAIN, если нет - запрашиваем
     if [[ -z "${DOMAIN:-}" ]]; then
         local domain_input
         domain_input=$(ask "Ваш домен (например: example.com)" "")
@@ -177,7 +320,6 @@ certs_menu() {
         fi
     fi
     
-    # Проверяем наличие EMAIL, если нет - запрашиваем
     if [[ -z "${EMAIL:-}" ]]; then
         EMAIL=$(ask "Email для Let's Encrypt" "admin@$DOMAIN")
         export EMAIL
@@ -203,49 +345,47 @@ certs_menu() {
             key2="$(ask "Значение второй переменной (если нужна, иначе Enter)" "")" ;;
     esac
     update_env ACME_DNS_PROVIDER "$prov"
-    mkdir -p "$CONFIG_ROOT/config/nginx/certs"
+    mkdir -p "$NGINX_CONFIG_DIR/certs"
 
     export CF_Token="$key1" CF_Account_ID="$key2"
+    
+    # Формируем reloadcmd: выставляет права и перезагружает nginx
+    local reloadcmd="chown root:www-data ${NGINX_CONFIG_DIR}/certs/privkey.pem && chmod 640 ${NGINX_CONFIG_DIR}/certs/privkey.pem && chown root:www-data ${NGINX_CONFIG_DIR}/certs/fullchain.pem && chmod 644 ${NGINX_CONFIG_DIR}/certs/fullchain.pem && systemctl reload nginx"
+    
     log "Выпускаю сертификат для $DOMAIN и *.$DOMAIN (DNS-01)..."
     "$HOME/.acme.sh/acme.sh" --issue --dns "$prov" -d "$DOMAIN" -d "*.$DOMAIN" --server letsencrypt \
         || die "выпуск не удался — проверьте DNS API credentials и propagation"
 
-    # Устанавливаем сертификаты без автоматического reload
     "$HOME/.acme.sh/acme.sh" --install-cert -d "$DOMAIN" \
-        --fullchain-file "$CONFIG_ROOT/config/nginx/certs/fullchain.pem" \
-        --key-file "$CONFIG_ROOT/config/nginx/certs/privkey.pem" \
-        && chmod 600 "$CONFIG_ROOT/config/nginx/certs/privkey.pem"
+        --fullchain-file "$NGINX_CONFIG_DIR/certs/fullchain.pem" \
+        --key-file "$NGINX_CONFIG_DIR/certs/privkey.pem" \
+        --reloadcmd "$reloadcmd" \
+        && log "Сертификаты установлены, права выставлены, nginx перезагружен."
     
-    log "Сертификаты успешно установлены!"
-    echo ""
-    echo "${c_txt}Пути к сертификатам:${c_off}"
-    echo "${c_txt}  Полный сертификат: $CONFIG_ROOT/config/nginx/certs/fullchain.pem${c_off}"
-    echo "${c_txt}  Приватный ключ:    $CONFIG_ROOT/config/nginx/certs/privkey.pem${c_off}"
-    echo ""
+    # Выставляем права сразу (на случай если reloadcmd не сработал при первом --install-cert)
+    chown root:www-data "$NGINX_CONFIG_DIR/certs/privkey.pem"
+    chmod 640 "$NGINX_CONFIG_DIR/certs/privkey.pem"
+    chown root:www-data "$NGINX_CONFIG_DIR/certs/fullchain.pem"
+    chmod 644 "$NGINX_CONFIG_DIR/certs/fullchain.pem"
     
-    # Проверяем существование файлов
-    if [[ -f "$CONFIG_ROOT/config/nginx/certs/fullchain.pem" && -f "$CONFIG_ROOT/config/nginx/certs/privkey.pem" ]]; then
+    if [[ -f "$NGINX_CONFIG_DIR/certs/fullchain.pem" && -f "$NGINX_CONFIG_DIR/certs/privkey.pem" ]]; then
         log "✓ Оба файла сертификатов существуют"
         [[ -f "$ENV_FILE" ]] && update_env CERT_ISSUED "yes"
         
-        # Проверяем, запущен ли nginx
-        if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx homeserver-nginx-1; then
-            log "nginx запущен — перезагружаем конфигурацию..."
-            docker compose exec -T nginx nginx -s reload 2>/dev/null \
+        if systemctl is-active --quiet nginx; then
+            nginx -t 2>/dev/null && systemctl reload nginx \
                 && log "nginx перезагружен" \
                 || warn "Не удалось перезагрузить nginx"
         else
             echo "${c_txt}ℹ nginx ещё не запущен${c_off}"
-            echo "${c_txt}  После запуска nginx (пункт 3 → подпункт 2) сертификаты будут использованы автоматически.${c_off}"
+            echo "${c_txt}  После запуска nginx (пункт 3) сертификаты будут использованы автоматически.${c_off}"
             echo "${c_txt}  Продление сертификатов: acme.sh cron (автоматически)${c_off}"
         fi
     else
         warn "Некоторые файлы сертификатов не найдены!"
-        [[ ! -f "$CONFIG_ROOT/config/nginx/certs/fullchain.pem" ]] && warn "  - Отсутствует: fullchain.pem"
-        [[ ! -f "$CONFIG_ROOT/config/nginx/certs/privkey.pem" ]] && warn "  - Отсутствует: privkey.pem"
+        [[ ! -f "$NGINX_CONFIG_DIR/certs/fullchain.pem" ]] && warn "  - Отсутствует: fullchain.pem"
+        [[ ! -f "$NGINX_CONFIG_DIR/certs/privkey.pem" ]] && warn "  - Отсутствует: privkey.pem"
     fi
     
     read -rp "Enter — продолжить " _ || true
 }
-
-

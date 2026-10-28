@@ -2,6 +2,7 @@
 
 install_classquiz() {
     ensure_prepared
+    check_dependencies
     log "=== ClassQuiz (викторины Kahoot-стиля) ==="
     local SUB="${SUB_CLASSQUIZ:-quiz.$DOMAIN}" secret="${CLASSQUIZ_SECRET_KEY:-$(gen_pass)}" \
           skip_email="${CLASSQUIZ_SKIP_EMAIL:-True}" uploads="${CLASSQUIZ_UPLOADS:-$CONFIG_ROOT/data/classquiz}" \
@@ -79,18 +80,33 @@ SUM
     fi
     add_site 48-quiz "server {
     listen 8443 ssl;
+    listen [::]:8443 ssl;
     server_name $SUB;
-    ssl_certificate     /etc/nginx/certs/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_certificate     $CONFIG_ROOT/config/nginx/certs/fullchain.pem;
+    ssl_certificate_key $CONFIG_ROOT/config/nginx/certs/privkey.pem;
 ${cq_auth}    location /api/ {
-        proxy_pass http://classquiz-api:80;
-        include /etc/nginx/proxy_common.conf;
+        proxy_pass http://127.0.0.1:3014;
+        include $CONFIG_ROOT/config/nginx/proxy_common.conf;
         client_max_body_size 50m;
     }
     location / {
-        proxy_pass http://classquiz-frontend:3000;
-        include /etc/nginx/proxy_common.conf;
+        proxy_pass http://127.0.0.1:3002;
+        include $CONFIG_ROOT/config/nginx/proxy_common.conf;
     }
 }"
-    log "Готово: https://$SUB"
+    
+    # Формируем параметры подключения
+    local -a conn_params=("URL: https://$SUB")
+    local -a log_params=("URL: https://$SUB")
+    
+    if [[ "$protected" == "true" ]]; then
+        conn_params+=("Логин: $user" "Пароль: $pass" "" "Ученики могут играть по PIN без авторизации")
+        log_params+=("Логин: $user" "Пароль: $pass")
+    fi
+    
+    # Вывод параметров подключения
+    show_connection_info "ClassQuiz" "${conn_params[@]}"
+    
+    # Сохранение параметров в файл
+    log_connection_params "ClassQuiz" "${log_params[@]}"
 }

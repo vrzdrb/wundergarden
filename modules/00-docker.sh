@@ -77,39 +77,6 @@ x-harden: &harden
   pids_limit: 400
 
 services:
-  nginx:
-    image: linuxserver/nginx
-    restart: unless-stopped
-    cap_add: [NET_BIND_SERVICE]
-    logging: *log
-    ports:
-      - "80:80"
-      - "443:443"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./config/nginx/proxy_common.conf:/etc/nginx/proxy_common.conf:ro
-      - ./config/nginx/ws_common.conf:/etc/nginx/ws_common.conf:ro
-      - ./config/nginx/conf.d:/etc/nginx/conf.d:ro
-      - ./config/nginx/stream.d:/etc/nginx/stream.d:ro
-      - ./config/nginx/htpasswd:/etc/nginx/htpasswd:ro
-      - ./config/nginx/certs:/etc/nginx/certs:ro
-      - ./data/nginx-logs:/var/log/nginx
-    networks:
-      - net-couchdb
-      - net-cal
-      - net-sftpgo
-      - net-sync
-      - net-matrix
-      - net-search
-      - net-draw
-      - net-pad
-      - net-quiz
-      - net-survey
-      - net-monitor
-      - net-gitea
-
   couchdb:
     image: couchdb:3.3
     restart: unless-stopped
@@ -121,6 +88,8 @@ services:
     volumes:
       - ./data/couchdb:/opt/couchdb/data
       - ./config/couchdb/10-livesync.ini:/opt/couchdb/etc/local.d/10-livesync.ini:ro
+    ports:
+      - "127.0.0.1:5984:5984"
     networks: [net-couchdb]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:5984/_up"]
@@ -137,6 +106,8 @@ services:
       - ./data/radicale:/data
       - ./config/radicale/config:/etc/radicale/config:ro
       - ./config/radicale/users:/etc/radicale/users
+    ports:
+      - "127.0.0.1:5232:5232"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:5232/ >/dev/null 2>&1 || exit 1"]
       interval: 30s
@@ -206,6 +177,8 @@ services:
       - ./config/matrix/continuwuity.toml:/etc/continuwuity/continuwuity.toml:ro
       - ./data/matrix:/var/lib/continuwuity
       - ./data/matrix-backups:/backup:rw
+    ports:
+      - "127.0.0.1:8008:8008"
     depends_on:
       - coturn
     healthcheck:
@@ -254,6 +227,8 @@ services:
     logging: *log
     volumes:
       - ./data/searxng:/etc/searxng:rw
+    ports:
+      - "127.0.0.1:8888:8080"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz >/dev/null 2>&1 || wget -qO- http://localhost:8080/ >/dev/null 2>&1 || exit 1"]
       interval: 30s
@@ -271,6 +246,8 @@ services:
     environment:
       - VITE_APP_HTTP_STORAGE_BACKEND_URL=https://${SUB_EXCALIDRAW}/storage
       - VITE_APP_WS_SERVER_URL=https://${SUB_EXCALIDRAW}
+    ports:
+      - "127.0.0.1:3001:80"
     networks: [net-draw]
 
   excalidraw-room:
@@ -278,6 +255,8 @@ services:
     restart: unless-stopped
     <<: *harden
     logging: *log
+    ports:
+      - "127.0.0.1:3012:8082"
     networks: [net-draw]
 
   excalidraw-storage:
@@ -285,6 +264,8 @@ services:
     restart: unless-stopped
     <<: *harden
     logging: *log
+    ports:
+      - "127.0.0.1:3013:8081"
     volumes:
       - ${EXCALIDRAW_STORAGE:-./data/excalidraw}:/data
     networks: [net-draw]
@@ -311,6 +292,8 @@ services:
     volumes:
       - ./config/etherpad/settings.json:/opt/etherpad-lite/settings.json:ro
       - ./data/etherpad:/opt/etherpad-lite/var
+    ports:
+      - "127.0.0.1:9001:9001"
     networks: [net-pad]
     depends_on:
       - etherpad-db
@@ -361,6 +344,8 @@ services:
     environment:
       - REDIS_URL=redis://classquiz-redis:6379/0?decode_responses=True
       - API_URL=http://classquiz-api:80
+    ports:
+      - "127.0.0.1:3002:80"
     networks: [net-quiz]
     depends_on:
       - classquiz-api
@@ -387,6 +372,8 @@ services:
       - MAIL_SERVER=localhost
       - STORAGE_BACKEND=local
       - STORAGE_PATH=/app/data
+    ports:
+      - "127.0.0.1:3014:80"
     volumes:
       - ${CLASSQUIZ_UPLOADS:-./data/classquiz}:/app/data
     networks: [net-quiz]
@@ -460,6 +447,8 @@ services:
       - PUBLIC_URL=https://${SUB_LIMESURVEY}/
     volumes:
       - ${LIMESURVEY_UPLOADS:-./data/limesurvey}:/var/www/html/upload
+    ports:
+      - "127.0.0.1:3003:80"
     networks: [net-survey]
     depends_on:
       - limesurvey-db
@@ -507,6 +496,8 @@ services:
       - GITEA__openid__ENABLE_OPENID_SIGNUP=false
     volumes:
       - ./data/gitea:/data
+    ports:
+      - "127.0.0.1:3000:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ >/dev/null 2>&1 || exit 1"]
       interval: 30s
@@ -705,89 +696,97 @@ EOF
     load_env
     mkdir -p "$CONFIG_ROOT"/{config/couchdb,data/{couchdb,radicale,syncthing,searxng,luanti/config},backups}
     mkdir -p "$CONFIG_ROOT"/config/nginx/{conf.d,stream.d,htpasswd,certs}
-    mkdir -p "$CONFIG_ROOT/data/nginx-logs"
-
-    cat > "$CONFIG_ROOT/config/nginx/nginx.conf" <<'NGXEOF'
-load_module modules/ngx_stream_module.so;
-user nginx;
-worker_processes auto;
-events { worker_connections 1024; }
-
-http {
-    include /etc/nginx/mime.types;
-    default_type application/octet-stream;
-    sendfile on;
-    server_tokens off;
-    client_max_body_size 512m;
-
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
-    ssl_prefer_server_ciphers off;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 1d;
-    ssl_session_tickets off;
-
-    limit_req_zone $binary_remote_addr zone=perip:10m rate=10r/s;
-    limit_conn_zone $binary_remote_addr zone=addr:10m;
-
-    client_body_timeout 10s;
-    client_header_timeout 10s;
-    send_timeout 10s;
-    keepalive_requests 1000;
-
-    add_header X-Content-Type-Options nosniff always;
-    add_header X-Frame-Options SAMEORIGIN always;
-    add_header Referrer-Policy strict-origin-when-cross-origin always;
-
-    access_log off;
-    error_log /var/log/nginx/error.log warn;
-    server {
-        listen 80 default_server;
-        return 301 https://$host$request_uri;
-    }
-    server {
-        listen 8443 ssl default_server;
-        ssl_certificate     /etc/nginx/certs/fullchain.pem;
-        ssl_certificate_key /etc/nginx/certs/privkey.pem;
-        return 444;
-    }
-    include /etc/nginx/conf.d/*.conf;
-}
-
-stream {
-    error_log /dev/stderr;
-    include /etc/nginx/stream.d/*.conf;
-}
-NGXEOF
-    hsts_line_enable
-
-    cat > "$CONFIG_ROOT/config/nginx/proxy_common.conf" <<'NGXEOF'
-proxy_set_header Host $host;
-proxy_set_header X-Real-IP $remote_addr;
-proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-proxy_set_header X-Forwarded-Proto $scheme;
-proxy_read_timeout 3600s;
-proxy_hide_header Server;
-proxy_hide_header X-Powered-By;
-limit_req zone=perip burst=100 nodelay;
-limit_conn addr 20;
-NGXEOF
-    cat > "$CONFIG_ROOT/config/nginx/ws_common.conf" <<'NGXEOF'
-proxy_http_version 1.1;
-proxy_set_header Upgrade $http_upgrade;
-proxy_set_header Connection "upgrade";
-NGXEOF
-    cat > "$CONFIG_ROOT/config/nginx/stream.d/00-map.conf" <<'NGXEOF'
-map $ssl_preread_server_name $stream_upstream {
-    default web_tls;
-}
-upstream web_tls { server 127.0.0.1:8443; }
-NGXEOF
 
     gen_compose
     log "Подготовка завершена. Секреты в $ENV_FILE (права 600)."
-    warn "Дальше: пункт 3 (nginx и сертификаты: сначала сертификаты, затем запуск)."
+    warn "Дальше: пункт 3 (nginx и сертификаты: сначала установка nginx, затем сертификаты, затем запуск)."
     warn "Не забудьте: A-записи поддоменов -> ваш статический IP, проброс 80/443 на роутере."
 }
 
 ensure_prepared() { [[ -f "$ENV_FILE" && -f "$COMPOSE_FILE" ]] || { warn "Сначала выполните пункт 2 (подготовка)."; prep_system; }; load_env; }
+
+# Проверка зависимостей перед установкой сервиса
+check_dependencies() {
+    local missing=()
+    
+    if ! command -v docker >/dev/null 2>&1; then
+        missing+=("Docker")
+    fi
+    
+    if ! command -v nginx >/dev/null 2>&1; then
+        missing+=("nginx (пункт меню: nginx и сертификаты → Установить nginx на хост)")
+    fi
+    
+    if [[ ! -f "$CONFIG_ROOT/config/nginx/certs/fullchain.pem" ]]; then
+        missing+=("SSL-сертификаты (пункт меню: nginx и сертификаты → Сертификаты)")
+    fi
+    
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo ""
+        echo "${c_mag}=== Отсутствуют необходимые компоненты ===${c_off}"
+        for m in "${missing[@]}"; do
+            echo "  ❌ $m"
+        done
+        echo ""
+        die "Установите недостающие компоненты и повторите попытку"
+    fi
+}
+
+# Вывод параметров подключения с паузой
+show_connection_info() {
+    local service="$1"
+    shift
+    local params=("$@")
+    
+    echo ""
+    echo "${c_mag}=== Параметры подключения: $service ===${c_off}"
+    for param in "${params[@]}"; do
+        echo "  $param"
+    done
+    echo ""
+    echo "${c_txt}⚠ Сохраните эти данные!${c_off}"
+    read -rp "Enter — продолжить " _ || true
+}
+
+# Сохранение параметров подключения в файл
+log_connection_params() {
+    local service="$1"
+    shift
+    local params=("$@")
+    local params_file="$CONFIG_ROOT/connection_params.txt"
+    
+    {
+        echo "=== $service ($(date '+%Y-%m-%d %H:%M:%S')) ==="
+        for param in "${params[@]}"; do
+            echo "  $param"
+        done
+        echo ""
+    } >> "$params_file"
+    
+    chmod 600 "$params_file"
+    log "Параметры сохранены в: $params_file"
+}
+
+# Ожидание готовности контейнера
+# Использование: wait_container <имя_контейнера> <команда_проверки> [аргументы...]
+# Пример: wait_container sftpgo-db mariadb-admin ping -h127.0.0.1
+wait_container() {
+    local container="$1"
+    shift
+    local cmd=("$@")
+    local max_attempts=30
+    local attempt=1
+    
+    log "Ожидание готовности контейнера $container..."
+    while [[ $attempt -le $max_attempts ]]; do
+        if docker compose exec -T "$container" "${cmd[@]}" >/dev/null 2>&1; then
+            log "Контейнер $container готов (попытка $attempt/$max_attempts)"
+            return 0
+        fi
+        sleep 2
+        ((attempt++))
+    done
+    
+    warn "Контейнер $container не готов после $max_attempts попыток"
+    return 1
+}

@@ -2,6 +2,7 @@
 
 install_etherpad() {
     ensure_prepared
+    check_dependencies
     log "=== Etherpad (совместный текстовый редактор) ==="
     local SUB="${SUB_ETHERPAD:-pad.$DOMAIN}" title="Etherpad" \
           padtext="Добро пожаловать! Этот документ синхронизируется между всеми участниками в реальном времени." \
@@ -50,11 +51,19 @@ SUM
     done
     update_env SUB_ETHERPAD "$SUB"
 
+    # Проверяем наличие функции forbidden_json
+    if ! type forbidden_json >/dev/null 2>&1; then
+        forbidden_json() {
+            [[ "$1" == *\"* || "$1" == *\\* ]]
+        }
+    fi
+
     if forbidden_json "$title" || forbidden_json "$padtext"; then
         die "название и текст пада не должны содержать кавычки или обратный слеш (JSON)"
     fi
 
     mkdir -p "$CONFIG_ROOT/config/etherpad" "$DATA_DIR/etherpad"
+    chown -R 1000:1000 "$DATA_DIR/etherpad" 2>/dev/null || true
     cat > "$CONFIG_ROOT/config/etherpad/settings.json" <<EOF
 {
   "title": "$title",
@@ -76,9 +85,29 @@ SUM
 EOF
     chmod 600 "$CONFIG_ROOT/config/etherpad/settings.json" 2>/dev/null || true
 
+    # Проверяем валидность JSON
+    if ! python3 -m json.tool "$CONFIG_ROOT/config/etherpad/settings.json" >/dev/null 2>&1; then
+        die "settings.json невалиден — проверьте название и текст пада на наличие кавычек"
+    fi
+
     docker compose up -d etherpad-db
     wait_container etherpad-db mariadb-admin ping -h127.0.0.1
     docker compose up -d etherpad
+
+    # Ожидаем готовности Etherpad
+    log "Ожидание готовности Etherpad..."
+    for i in {1..30}; do
+        if curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9001/ 2>/dev/null | grep -q "200"; then
+            log "Etherpad готов (попытка $i/30)"
+            break
+        fi
+        sleep 2
+    done
+
+    # Проверяем подключение к БД из контейнера
+    if ! docker compose exec -T etherpad mysql -h etherpad-db -u etherpad -p"$ETHERPAD_DB_PASSWORD" -e "SELECT 1" etherpad >/dev/null 2>&1; then
+        warn "Etherpad не может подключиться к БД — проверьте логи: docker compose logs etherpad"
+    fi
 
     local ep_auth=""
     if [[ "$protected" == "true" ]]; then
@@ -89,22 +118,29 @@ EOF
     fi
     add_site 47-pad "server {
     listen 8443 ssl;
+    listen [::]:8443 ssl;
     server_name $SUB;
-    ssl_certificate     /etc/nginx/certs/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_certificate     $CONFIG_ROOT/config/nginx/certs/fullchain.pem;
+    ssl_certificate_key $CONFIG_ROOT/config/nginx/certs/privkey.pem;
 ${ep_auth}    location / {
-        proxy_pass http://etherpad:9001;
-        include /etc/nginx/proxy_common.conf;
-        include /etc/nginx/ws_common.conf;
+        proxy_pass http://127.0.0.1:9001;
+        include $CONFIG_ROOT/config/nginx/proxy_common.conf;
+        include $CONFIG_ROOT/config/nginx/ws_common.conf;
     }
 }"
 
-    local ep_note=""
-    [[ "$protected" == "true" && -n "$user" ]] && ep_note=" Доступ только с паролем basicauth ($user / $pass)."
-    cat <<EOF
-
- Готово: https://$SUB
- Каждый пад — по ссылке https://$SUB/<имя-пада>; цвета авторов, история правок, экспорт txt/md/pdf — встроены.$ep_note
- Плагины (таблицы, заголовки) — через env ADMIN_PLUGINS в compose, если понадобятся.
-EOF
+    # Формируем параметры подключения
+    local -a conn_params=("URL: https://$SUB" "Каждый пад: https://$SUB/<имя-пада>" "Экспорт: txt/md/pdf")
+    local -a log_params=("URL: https://$SUB")
+    
+    if [[ "$protected" == "true" && -n "$user" ]]; then
+        conn_params+=("" "Доступ по паролю basicauth:" "  Логин: $user" "  Пароль: $pass")
+        log_params+=("Логин: $user" "Пароль: $pass")
+    fi
+    
+    # Вывод параметров подключения
+    show_connection_info "Etherpad" "${conn_params[@]}"
+    
+    # Сохранение параметров в файл
+    log_connection_params "Etherpad" "${log_params[@]}"
 }

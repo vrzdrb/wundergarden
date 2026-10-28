@@ -2,6 +2,7 @@
 
 install_luanti() {
     ensure_prepared
+    check_dependencies
     log "=== Luanti-сервер ==="
     local worlds="${LUANTI_WORLDS:-$CONFIG_ROOT/data/luanti/worlds}" \
           mods="${LUANTI_MODS:-$CONFIG_ROOT/data/luanti/mods}" \
@@ -69,6 +70,11 @@ SUM
     chown -R 1000:1000 "$worlds" "$mods" "$games" "$CONFIG_ROOT/data/luanti/config" 2>/dev/null || true
     update_env LUANTI_WORLDS "$worlds"; update_env LUANTI_MODS "$mods"; update_env LUANTI_GAMES "$games"
 
+    # Открываем порт в UFW
+    require_cmd ufw ufw
+    ufw allow 30000/udp comment 'Luanti' >/dev/null 2>&1 && log "UFW: порт 30000/udp открыт" || warn "Ошибка UFW"
+    ufw reload >/dev/null 2>&1 || true
+
     local conf="$CONFIG_ROOT/data/luanti/config/minetest.conf"
     cat > "$conf" <<EOF
 server_name = $sname
@@ -116,11 +122,28 @@ EOF
     fi
 
     docker compose up -d luanti
-    cat <<EOF
-
- Готово. Адрес: ваш IP :30000 (UDP) — пробросьте порт на роутере.
- Мир: $wdir
-${announce:+ ВНИМАНИЕ: сервер опубликован в публичном списке servers.minetest.net.}
- Если образ не подхватил конфиг — проверьте в доках образа путь (--config /config/.minetest/minetest.conf).
-EOF
+    
+    # Формируем параметры подключения
+    local -a conn_params=(
+        "Адрес: ${PUBLIC_IP:-<ваш-IP>}:30000 (UDP)"
+        "Мир: $wdir"
+        "Игра: $game"
+        "Макс. игроков: $maxusers"
+        "Режим: $mode"
+        "PvP: $pvp"
+        "Порт 30000/udp открыт в UFW"
+    )
+    
+    if [[ "$announce" == "true" ]]; then
+        conn_params+=("" "⚠ ВНИМАНИЕ: сервер опубликован в публичном списке servers.minetest.net!")
+    fi
+    
+    # Вывод параметров подключения
+    show_connection_info "Luanti (Minetest)" "${conn_params[@]}"
+    
+    # Сохранение параметров в файл
+    log_connection_params "Luanti" \
+        "Адрес: ${PUBLIC_IP:-<ваш-IP>}:30000 (UDP)" \
+        "Мир: $wdir" \
+        "Игра: $game"
 }

@@ -895,10 +895,10 @@ echo "Активация списка..."
 ipset create rkn4 hash:net 2>/dev/null || true
 ipset swap rkn4_tmp rkn4 2>/dev/null || true
 ipset destroy rkn4_tmp 2>/dev/null || true
-echo "Применение правил iptables..."
-iptables -C INPUT -m set --match-set rkn4 src -j DROP 2>/dev/null || iptables -I INPUT 1 -m set --match-set rkn4 src -j DROP
-echo "Готово!"
-EOF
+    echo "Применение правил iptables..."
+    iptables -C INPUT -m set --match-set rkn4 src -j DROP 2>/dev/null || iptables -I INPUT 1 -m set --match-set rkn4 src -j DROP
+    iptables -C DOCKER-USER -m set --match-set rkn4 src -j DROP 2>/dev/null || iptables -I DOCKER-USER 1 -m set --match-set rkn4 src -j DROP 2>/dev/null || true
+    echo "Готово!"EOF
     chmod +x "$script"
     
     echo "${c_txt}Запускаем rkn-block.sh...${c_off}"

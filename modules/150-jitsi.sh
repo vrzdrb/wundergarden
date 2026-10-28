@@ -20,6 +20,7 @@ jitsi_get_env() { ( cd "$JITSI_DIR" && grep "^$1=" .env 2>/dev/null | head -1 | 
 
 install_jitsi() {
     ensure_prepared
+    check_dependencies
     log "=== Jitsi Meet (видеоконференции) ==="
     [[ -d "$JITSI_DIR" ]] && { ask_yn "Обнаружена установка в $JITSI_DIR — переустановить? Конфиг сохранится." || return 0; }
 
@@ -118,33 +119,45 @@ EOF
         sed -i "s#- '\${HTTPS_PORT}:8443'#- '127.0.0.1:\${HTTPS_PORT}:8443'#" docker-compose.yml
     fi
 
+    # Открываем порт JVB (10000/udp) в UFW
+    require_cmd ufw ufw
+    ufw allow 10000/udp comment 'Jitsi JVB media' >/dev/null 2>&1 && log "UFW: порт 10000/udp открыт (JVB)" || warn "Ошибка UFW"
+    ufw reload >/dev/null 2>&1 || true
+
     docker compose -f docker-compose.yml ${turn_src:+$( [[ "$turn_src" == "2" ]] && echo "-f coturn.yml" )} pull
     jitsi_dc up -d || die "ошибка запуска: cd $JITSI_DIR && docker compose logs"
 
     if [[ "$mode" == "1" ]]; then
         add_site 150-jitsi "server {
     listen 8443 ssl;
+    listen [::]:8443 ssl;
     server_name $domain;
-    ssl_certificate     /etc/nginx/certs/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_certificate     $CONFIG_ROOT/config/nginx/certs/fullchain.pem;
+    ssl_certificate_key $CONFIG_ROOT/config/nginx/certs/privkey.pem;
     client_max_body_size 0;
     location / {
         proxy_pass http://127.0.0.1:7443;
-        include /etc/nginx/proxy_common.conf;
-        include /etc/nginx/ws_common.conf;
+        include $CONFIG_ROOT/config/nginx/proxy_common.conf;
+        include $CONFIG_ROOT/config/nginx/ws_common.conf;
         proxy_read_timeout 3600s;
     }
 }"
         update_env SUB_JITSI "$domain"
     fi
 
-    cat <<EOF
-
- Готово: https://$domain
- TURN: $([[ "$turn_src" == "1" ]] && echo "наш coturn (turn.$DOMAIN:3478)" || echo "свой coturn (3478 host-network)")
- Медиа JVB: 10000/udp (docker публикует сам; на VPS откройте в security group).
- Комната без авторизации: любой, кто знает ссылку. Включите JWT (п.22 меню -> действие 2).
-EOF
+    # Вывод параметров подключения
+    show_connection_info "Jitsi Meet" \
+        "URL: https://$domain" \
+        "TURN: $([[ "$turn_src" == "1" ]] && echo "наш coturn (turn.$DOMAIN:3478)" || echo "свой coturn (3478 host-network)")" \
+        "Медиа JVB: 10000/udp (открыт в UFW)" \
+        "" \
+        "Комната без авторизации: любой, кто знает ссылку" \
+        "Для JWT-аутентификации: меню Jitsi -> действие 2"
+    
+    # Сохранение параметров в файл
+    log_connection_params "Jitsi Meet" \
+        "URL: https://$domain" \
+        "TURN: $([[ "$turn_src" == "1" ]] && echo "turn.$DOMAIN:3478" || echo "свой coturn:3478")"
 }
 
 jitsi_toggle_udp() {
@@ -170,7 +183,6 @@ jitsi_toggle_udp() {
 
 jitsi_menu() {
     while true; do
-        clear
         clear
         cat <<SUM
 

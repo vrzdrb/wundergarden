@@ -2,6 +2,7 @@
 
 install_sftpgo() {
     ensure_prepared
+    check_dependencies
     log "=== SFTPGo (файлы + ссылки друзьям) ==="
     local sftpdata="${SFTPGO_DATA:-/mnt/emmc/cloud}" admin_user="${SFTPGO_ADMIN_USER:-admin}" \
           cloud_user="" cloud_pass="" cloud_quota=0 \
@@ -52,8 +53,8 @@ SUM
                 else
                     cloud_user="$(ask "Логин пользователя облака" "cloud")"
                     while :; do
-                        cloud_pass="$(ask "Пароль (Enter — сгенерировать; без кавычек и \\)" "$(gen_pass)")"
-                        [[ "$cloud_pass" != *[\"\\]* ]] && break
+                        cloud_pass="$(ask "Пароль (Enter — сгенерировать; без кавычек и \\\\")" "$(gen_pass)")"
+                        [[ "$cloud_pass" != *[\\"\\]* ]] && break
                         warn "кавычки и обратный слеш ломают JSON API — выберите другой пароль"
                     done
                     log "Пароль '$cloud_user': $cloud_pass"
@@ -74,13 +75,55 @@ SUM
     done
 
     mkdir -p "$sftpdata"; update_env SFTPGO_DATA "$sftpdata"
-    update_env SFTPGO_SFTP_BIND "$([[ "$sftp_ext" == "true" ]] && echo 0.0.0.0:2022 || echo 127.0.0.1:2022)"
+    local new_sftp_bind="$([[ "$sftp_ext" == "true" ]] && echo 0.0.0.0:2022 || echo 127.0.0.1:2022)"
+    local old_sftp_bind="${SFTPGO_SFTP_BIND:-127.0.0.1:2022}"
+    update_env SFTPGO_SFTP_BIND "$new_sftp_bind"
 
+    # Открываем порт SFTP в UFW если SFTP наружу
+    if [[ "$sftp_ext" == "true" ]]; then
+        require_cmd ufw ufw
+        ufw allow 2022/tcp comment 'SFTPGo SFTP' >/dev/null 2>&1 && log "UFW: порт 2022/tcp открыт" || warn "Ошибка UFW"
+        ufw reload >/dev/null 2>&1 || true
+    fi
+
+    # Запускаем MariaDB и ждём готовности
     docker compose up -d sftpgo-db
     wait_container sftpgo-db mariadb-admin ping -h127.0.0.1
-    docker compose up -d sftpgo
-    sleep 4
+    
+    # Проверяем, нужно ли пересоздать контейнер SFTPGo (если изменился SFTP_BIND)
+    local need_recreate="false"
+    if docker compose ps -q sftpgo 2>/dev/null | grep -q .; then
+        # Контейнер уже существует, проверяем нужно ли пересоздание
+        if [[ "$old_sftp_bind" != "$new_sftp_bind" ]]; then
+            log "Обнаружено изменение SFTP_BIND ($old_sftp_bind -> $new_sftp_bind) — пересоздаю контейнер"
+            need_recreate="true"
+        fi
+    fi
+    
+    # Запускаем или пересоздаём SFTPGo
+    if [[ "$need_recreate" == "true" ]]; then
+        docker compose up -d --force-recreate sftpgo
+    else
+        docker compose up -d sftpgo
+    fi
+    
+    # Ждём готовности SFTPGo (увеличенная задержка)
+    log "Ожидание готовности SFTPGo..."
+    local sftpgo_ready="false"
+    for i in {1..15}; do
+        if curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/v2/version 2>/dev/null | grep -q "200"; then
+            sftpgo_ready="true"
+            log "SFTPGo готов (попытка $i/15)"
+            break
+        fi
+        sleep 2
+    done
+    
+    if [[ "$sftpgo_ready" != "true" ]]; then
+        warn "SFTPGo не ответил после 30 секунд — продолжаю, но создание пользователя может не сработать"
+    fi
 
+    # Создаём пользователя облака если задан
     if [[ -n "$cloud_user" ]]; then
         local code
         code=$(curl -s -o /dev/null -w '%{http_code}' -u "$admin_user:$SFTPGO_ADMIN_PASSWORD" -X POST \
@@ -93,42 +136,69 @@ SUM
         esac
     fi
 
+    # Создаём nginx-конфиги
     add_site 30-files "server {
     listen 8443 ssl;
+    listen [::]:8443 ssl;
     server_name $SUB_FILES;
-    ssl_certificate     /etc/nginx/certs/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_certificate     $CONFIG_ROOT/config/nginx/certs/fullchain.pem;
+    ssl_certificate_key $CONFIG_ROOT/config/nginx/certs/privkey.pem;
     client_max_body_size 0;
     location /web/admin { return 403; }
     location / {
-        proxy_pass http://sftpgo:8080;
-        include /etc/nginx/proxy_common.conf;
+        proxy_pass http://127.0.0.1:8080;
+        include $CONFIG_ROOT/config/nginx/proxy_common.conf;
     }
 }"
     if [[ "$webdav" == "true" ]]; then
         add_site 35-webdav "server {
     listen 8443 ssl;
+    listen [::]:8443 ssl;
     server_name $SUB_WEBDAV;
-    ssl_certificate     /etc/nginx/certs/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_certificate     $CONFIG_ROOT/config/nginx/certs/fullchain.pem;
+    ssl_certificate_key $CONFIG_ROOT/config/nginx/certs/privkey.pem;
     client_max_body_size 0;
     location / {
-        proxy_pass http://sftpgo:8090;
-        include /etc/nginx/proxy_common.conf;
+        proxy_pass http://127.0.0.1:8090;
+        include $CONFIG_ROOT/config/nginx/proxy_common.conf;
     }
 }"
     else
         rm -f "$CONFIG_ROOT/config/nginx/conf.d/35-webdav.conf"; reload_nginx
     fi
 
-    local sftp_note="" webdav_note=""
-    [[ "$sftp_ext" == "true" ]] && sftp_note=" SFTP снаружи: sftp -P 2022 <user>@$PUBLIC_IP (откройте 2022/tcp в UFW и на роутере)."
-    [[ "$webdav" == "true" ]] && sftp_note="$sftp_note"$'\n'" WebDAV: https://$SUB_WEBDAV (логин/пароль пользователя облака; для rclone/DAVx⁵)."
-    cat <<EOF
-
- Готово.
- Веб-клиент: https://$SUB_FILES (share-ссылки друзьям создаются в нём)
- Админка: ssh -L 8080:localhost:8080 user@$DOMAIN -> http://localhost:8080 ($admin_user)
-$sftp_note
-EOF
+    # Формируем параметры подключения
+    local -a conn_params=(
+        "Веб-клиент: https://$SUB_FILES"
+        "Админка: ssh -L 8080:localhost:8080 user@$DOMAIN -> http://localhost:8080"
+        "Логин админа: $admin_user"
+        "Пароль админа: $SFTPGO_ADMIN_PASSWORD"
+    )
+    local -a log_params=(
+        "Веб-клиент: https://$SUB_FILES"
+        "Админка: ssh -L 8080:localhost:8080 user@$DOMAIN -> http://localhost:8080"
+        "Логин админа: $admin_user"
+        "Пароль админа: $SFTPGO_ADMIN_PASSWORD"
+    )
+    
+    if [[ "$sftp_ext" == "true" ]]; then
+        conn_params+=("" "SFTP снаружи: sftp -P 2022 <user>@$PUBLIC_IP")
+        log_params+=("SFTP: sftp -P 2022 <user>@$PUBLIC_IP")
+    fi
+    
+    if [[ -n "$cloud_user" ]]; then
+        conn_params+=("" "Пользователь облака:" "  Логин: $cloud_user" "  Пароль: $cloud_pass")
+        log_params+=("Пользователь облака: $cloud_user / $cloud_pass")
+    fi
+    
+    if [[ "$webdav" == "true" ]]; then
+        conn_params+=("" "WebDAV: https://$SUB_WEBDAV")
+        log_params+=("WebDAV: https://$SUB_WEBDAV")
+    fi
+    
+    # Вывод параметров подключения
+    show_connection_info "SFTPGo" "${conn_params[@]}"
+    
+    # Сохранение параметров в файл
+    log_connection_params "SFTPGo" "${log_params[@]}"
 }
