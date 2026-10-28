@@ -53,8 +53,8 @@ SUM
                 else
                     cloud_user="$(ask "Логин пользователя облака" "cloud")"
                     while :; do
-                        cloud_pass="$(ask "Пароль (Enter — сгенерировать; без кавычек и \\\\")" "$(gen_pass)")"
-                        [[ "$cloud_pass" != *[\\"\\]* ]] && break
+                        cloud_pass="$(ask 'Пароль (Enter — сгенерировать; без кавычек и \\)' "$(gen_pass)")"
+                        [[ "$cloud_pass" =~ [\\\"] ]] || break
                         warn "кавычки и обратный слеш ломают JSON API — выберите другой пароль"
                     done
                     log "Пароль '$cloud_user': $cloud_pass"
