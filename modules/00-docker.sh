@@ -78,7 +78,7 @@ x-harden: &harden
 
 services:
   nginx:
-    image: nginx:stable
+    image: linuxserver/nginx
     restart: unless-stopped
     <<: *harden
     cap_add: [NET_BIND_SERVICE]
