@@ -308,6 +308,7 @@ create_user() {
     [[ -z "$username" ]] && return 0
     if id "$username" >/dev/null 2>&1; then
         warn "пользователь $username уже существует"
+        read -rp "Нажмите Enter для продолжения " _ || true
     else
         useradd -m -s /bin/bash "$username"
         echo "${c_txt}Задайте пароль для пользователя $username:${c_off}"
@@ -316,6 +317,7 @@ create_user() {
             log "Пользователь $username создан и добавлен в группу sudo"
         else
             warn "Ошибка установки пароля"
+            read -rp "Нажмите Enter для продолжения " _ || true
         fi
     fi
     read -rp "Enter — продолжить " _ || true
@@ -437,9 +439,11 @@ ssh_settings_menu() {
                         log "SSH перезапущен, порт: $new_port"
                     else
                         warn "Ошибка перезапуска SSH"
+                        read -rp "Нажмите Enter для продолжения " _ || true
                     fi
                 else
                     warn "Ошибка в конфигурации SSH! Откат изменений"
+                    read -rp "Нажмите Enter для продолжения " _ || true
                     if grep -q "^Port " "$cfg" 2>/dev/null; then
                         sed -i "s|^Port .*|Port $port|" "$cfg"
                     else
@@ -498,10 +502,11 @@ EOF
                         log "SSH перезапущен, аутентификация по ключу включена"
                     else
                         warn "Ошибка перезапуска SSH"
+                        read -rp "Нажмите Enter для продолжения " _ || true
                     fi
                 else
                     warn "Ошибка в конфигурации SSH!"
-                    read -rp "Enter — продолжить " _ || true
+                    read -rp "Нажмите Enter для продолжения " _ || true
                     continue
                 fi
                 
@@ -568,9 +573,11 @@ EOF
                         log "Вход по паролю $(if [[ "$new_pass_auth" == "no" ]]; then echo "отключён"; else echo "включён"; fi), SSH перезапущен"
                     else
                         warn "Ошибка перезапуска SSH"
+                        read -rp "Нажмите Enter для продолжения " _ || true
                     fi
                 else
                     warn "Ошибка в конфигурации SSH!"
+                    read -rp "Нажмите Enter для продолжения " _ || true
                 fi
                 read -rp "Enter — продолжить " _ || true ;;
             4)
@@ -620,9 +627,11 @@ EOF
                         log "PermitRootLogin установлен в $new_val, SSH перезапущен"
                     else
                         warn "Ошибка перезапуска SSH"
+                        read -rp "Нажмите Enter для продолжения " _ || true
                     fi
                 else
                     warn "Ошибка в конфигурации SSH!"
+                    read -rp "Нажмите Enter для продолжения " _ || true
                 fi
                 read -rp "Enter — продолжить " _ || true ;;
             5)
@@ -751,9 +760,11 @@ change_ssh_port_direct() {
             log "SSH перезапущен, порт: $new_port"
         else
             warn "Ошибка перезапуска SSH"
+            read -rp "Нажмите Enter для продолжения " _ || true
         fi
     else
         warn "Ошибка в конфигурации SSH! Откат изменений"
+        read -rp "Нажмите Enter для продолжения " _ || true
         if grep -q "^Port " "$cfg" 2>/dev/null; then
             sed -i "s|^Port .*|Port $port|" "$cfg"
         else
@@ -848,6 +859,7 @@ ABEOF
     else
         rm -f "$script"
         warn "Ошибка применения"
+        read -rp "Нажмите Enter для продолжения " _ || true
     fi
     read -rp "Enter — продолжить " _ || true
     return 0
@@ -905,6 +917,7 @@ EOF
         log "Задание добавлено в crontab для ежедневного выполнения в 3:00"
     else
         warn "Задание уже существует в crontab"
+        read -rp "Нажмите Enter для продолжения " _ || true
     fi
     
     require_cmd ufw ufw
@@ -930,7 +943,7 @@ swap_menu() {
         case "$c" in
             1)
                 local g; g=$(ask "Размер swap, ГБ" "1")
-                [[ "$g" =~ ^[0-9]+$ ]] || { warn "нужно число"; continue; }
+                [[ "$g" =~ ^[0-9]+$ ]] || { warn "нужно число"; read -rp "Нажмите Enter для продолжения " _ || true; continue; }
                 if swapon --show=NAME --noheadings 2>/dev/null | grep -q /swapfile; then
                     swapoff /swapfile && sed -i '\|^/swapfile |d' /etc/fstab && rm -f /swapfile
                 fi
@@ -945,10 +958,11 @@ swap_menu() {
                     log "Swap отключён"
                 else
                     warn "Swap не активен"
+                    read -rp "Нажмите Enter для продолжения " _ || true
                 fi
                 read -rp "Enter — продолжить " _ || true ;;
             0) return 0 ;;
-            *) warn "нет такого пункта" ;;
+            *) warn "нет такого пункта"; read -rp "Нажмите Enter для продолжения " _ || true ;;
         esac
     done
 }
@@ -990,6 +1004,7 @@ sudo_logging_menu() {
                         log "Файл лога: /var/log/sudo.log"
                     else
                         warn "Ошибка в конфигурации sudoers, откат изменений"
+                        read -rp "Нажмите Enter для продолжения " _ || true
                         sed -i '/^Defaults.*logfile.*sudo.log/d' /etc/sudoers
                     fi
                 else
@@ -1003,6 +1018,7 @@ sudo_logging_menu() {
                         log "Логирование sudo отключено"
                     else
                         warn "Ошибка в конфигурации sudoers"
+                        read -rp "Нажмите Enter для продолжения " _ || true
                     fi
                 else
                     log "Логирование sudo отключено"
@@ -1025,6 +1041,7 @@ sudo_logging_menu() {
                                 log "Файл лога: /var/log/sudo.log"
                             else
                                 warn "Ошибка в конфигурации sudoers"
+                                read -rp "Нажмите Enter для продолжения " _ || true
                             fi
                         else
                             log "Логирование sudo уже включено"
@@ -1033,7 +1050,7 @@ sudo_logging_menu() {
                     read -rp "Enter — продолжить " _ || true
                 fi ;;
             0) return 0 ;;
-            *) warn "нет такого пункта" ;;
+            *) warn "нет такого пункта"; read -rp "Нажмите Enter для продолжения " _ || true ;;
         esac
     done
 }
@@ -1143,6 +1160,7 @@ EOF
                 
                 if [[ -z "$new_ports" ]]; then
                     warn "Ввод пустой, изменения отменены"
+                    read -rp "Нажмите Enter для продолжения " _ || true
                 else
                     if grep -q "^port\s*=" "$jail_file"; then
                         sed -i "s/^port\s*=.*/port = $new_ports/" "$jail_file"
@@ -1222,7 +1240,7 @@ setup_dns_netplan() {
     fi
     
     local NETPLAN_FILE="/etc/netplan/50-cloud-init.yaml"
-    [[ -f "$NETPLAN_FILE" ]] || { warn "Не найден $NETPLAN_FILE"; return 1; }
+    [[ -f "$NETPLAN_FILE" ]] || { warn "Не найден $NETPLAN_FILE"; read -rp "Нажмите Enter для продолжения " _ || true; return 1; }
     
     local DNS_SERVERS=(1.1.1.1 9.9.9.9 8.8.8.8)
     local SEARCH_DOMAINS=(netgrid.host)
@@ -1349,6 +1367,7 @@ PY
         if ! netplan generate; then
             cp -a "$BACKUP_DIR/netplan/." /etc/netplan/
             warn "netplan generate не прошёл, netplan-файлы восстановлены из $BACKUP_DIR"
+            read -rp "Нажмите Enter для продолжения " _ || true
             return 1
         fi
         log "netplan apply"
