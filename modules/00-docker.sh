@@ -5,30 +5,55 @@ c_txt=${c_txt:-$'\033[96m'}
 c_off=${c_off:-$'\033[0m'}
 
 install_docker() {
-    if docker compose version >/dev/null 2>&1; then
-        log "Docker уже установлен: $(docker --version)"
+    local docker_ok=false
+    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+        docker_ok=true
+    fi
+
+    if [[ "$docker_ok" == true ]]; then
+        if systemctl is-active --quiet docker; then
+            log "Docker уже установлен и daemon работает: $(docker --version)"
+            return 0
+        fi
+        log "Docker установлен, но сервис не запущен — запускаю daemon..."
+        systemctl enable --now docker >/dev/null 2>&1 || die "не удалось запустить docker.service"
+        docker info >/dev/null 2>&1 || die "docker daemon не отвечает после старта"
+        docker compose version >/dev/null 2>&1 || die "docker compose plugin не появился"
+        log "Docker daemon восстановлен: $(docker --version)"
         return 0
     fi
+
     log "Устанавливаю Docker (download.docker.com)..."
     local os_id os_like
     os_id="$(. /etc/os-release && echo "$ID")"
     os_like="$(. /etc/os-release && echo "${ID_LIKE:-}")"
     local distro="debian"
-    if [[ "$os_id" == "ubuntu" || " $os_like " == *" ubuntu "* || " $os_like " == *" debian "* && "$os_id" != "debian" ]]; then
-        distro="$os_id"
-        [[ "$distro" != "ubuntu" && "$distro" != "debian" ]] && distro="ubuntu"
+
+    if [[ "$os_id" == "ubuntu" ]]; then
+        distro="ubuntu"
+    elif [[ "$os_id" == "debian" ]]; then
+        distro="debian"
+    else
+        case "$os_like" in
+            *ubuntu*) distro="ubuntu" ;;
+            *debian*) distro="debian" ;;
+            *) die "поддерживаются Debian/Ubuntu (обнаружен: $os_id / $os_like)" ;;
+        esac
     fi
-    [[ "$distro" != "debian" && "$distro" != "ubuntu" ]] && die "поддерживаются Debian/Ubuntu (обнаружен: $os_id)"
+
     apt-get update -qq
-    apt-get install -y -qq ca-certificates curl
+    apt-get install -y -qq ca-certificates curl gnupg
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL "https://download.docker.com/linux/$distro/gpg" -o /etc/apt/keyrings/docker.asc
     chmod a+r /etc/apt/keyrings/docker.asc
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$distro $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
         > /etc/apt/sources.list.d/docker.list
+
     apt-get update -qq
     apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-    systemctl enable --now docker >/dev/null
+
+    systemctl enable --now docker >/dev/null 2>&1 || die "не удалось включить/запустить docker.service"
+    docker info >/dev/null 2>&1 || die "docker daemon не отвечает после установки"
     docker compose version >/dev/null 2>&1 || die "docker compose plugin не появился"
     log "Docker установлен: $(docker --version), compose: $(docker compose version --short)"
 
@@ -54,10 +79,62 @@ EOF
 }
 EOF
         systemctl reload docker >/dev/null 2>&1 || true
+        docker info >/dev/null 2>&1 || die "docker daemon не отвечает после записи daemon.json"
         log "daemon.json: live-restore, no-new-privileges, ротация логов, ulimits nofile=64000."
         warn "daemon-дефолт no-new-privileges применяется к НОВЫМ контейнерам — старые пересоздадутся при up -d."
     else
         log "daemon.json уже существует — оставляю как есть (сверьте live-restore/no-new-privileges вручную)."
+        if ! python3 - <<'PY' >/dev/null 2>&1
+import json, sys
+p = '/etc/docker/daemon.json'
+try:
+    data = json.load(open(p))
+except Exception:
+    sys.exit(1)
+if not data.get('live-restore', False):
+    sys.exit(1)
+if not data.get('no-new-privileges', False):
+    sys.exit(1)
+PY
+        then
+            warn "daemon.json существует, но отсутствуют live-restore/no-new-privileges — проверьте его вручную."
+        fi
+    fi
+}
+
+validate_required_secrets() {
+    [[ -f "$ENV_FILE" ]] || return 0
+    load_env >/dev/null 2>&1 || true
+
+    local required=(
+        COUCHDB_USER
+        COUCHDB_PASSWORD
+        SFTPGO_ADMIN_PASSWORD
+        SFTPGO_DB_PASSWORD
+        SFTPGO_DB_ROOT_PASSWORD
+        TURN_PASSWORD
+        CLASSQUIZ_SECRET_KEY
+        GITEA_DB_PASSWORD
+        LIMESURVEY_DB_PASSWORD
+        LIMESURVEY_DB_ROOT_PASSWORD
+        LIMESURVEY_ADMIN_PASSWORD
+        MUMBLE_SUPERUSER_PASSWORD
+    )
+
+    local missing=()
+    local v
+    for v in "${required[@]}"; do
+        if [[ -z "${!v:-}" ]]; then
+            missing+=("$v")
+        fi
+    done
+
+    if (( ${#missing[@]} > 0 )); then
+        echo "${c_mag}=== Отсутствуют обязательные переменные окружения ===${c_off}"
+        for v in "${missing[@]}"; do
+            echo "  ❌ $v"
+        done
+        die "Заполните переменные окружения в $ENV_FILE и повторите попытку"
     fi
 }
 
@@ -109,7 +186,7 @@ services:
     ports:
       - "127.0.0.1:5232:5232"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:5232/ >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5232/ >/dev/null 2>&1 || curl -fsS http://localhost:5232/ >/dev/null 2>&1 || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -135,7 +212,7 @@ services:
       - "127.0.0.1:8080:8080"
       - ${SFTPGO_SFTP_BIND:-127.0.0.1:2022}:2022
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz >/dev/null 2>&1 || curl -fsS http://localhost:8080/healthz >/dev/null 2>&1 || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -173,8 +250,6 @@ services:
       - CONTINUWUITY_CONFIG=/data/continuwuity.toml
     volumes:
       - ./config/matrix/continuwuity.toml:/data/continuwuity.toml:ro
-      - ./config/matrix/continuwuity.toml:/data/conduwuit.toml:ro
-      - ./config/matrix/continuwuity.toml:/etc/continuwuity/continuwuity.toml:ro
       - ./data/matrix:/var/lib/continuwuity
       - ./data/matrix-backups:/backup:rw
     ports:
@@ -182,7 +257,7 @@ services:
     depends_on:
       - coturn
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8008/_matrix/client/versions >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8008/_matrix/client/versions >/dev/null 2>&1 || curl -fsS http://localhost:8008/_matrix/client/versions >/dev/null 2>&1 || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -230,7 +305,7 @@ services:
     ports:
       - "127.0.0.1:8888:8080"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz >/dev/null 2>&1 || wget -qO- http://localhost:8080/ >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz >/dev/null 2>&1 || curl -fsS http://localhost:8080/healthz >/dev/null 2>&1 || wget -qO- http://localhost:8080/ >/dev/null 2>&1 || curl -fsS http://localhost:8080/ >/dev/null 2>&1 || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -331,7 +406,7 @@ services:
       - MUMBLE_CONFIG_sslKey=/cert/privkey.pem
     volumes:
       - ./data/mumble:/data
-      - ./config/mumble:/cert:ro
+      - ${CONFIG_ROOT:-.}/config/nginx/certs:/cert:ro
     ports:
       - "64738:64738/tcp"
       - "64738:64738/udp"
@@ -499,7 +574,7 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ >/dev/null 2>&1 || curl -fsS http://localhost:3000/ >/dev/null 2>&1 || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -618,7 +693,7 @@ prep_system() {
     log "Часовой пояс из системы: $tz"
 
     mkdir -p "$CONFIG_ROOT"/{config/couchdb,data/{couchdb,radicale,syncthing,searxng,luanti/config},backups}
-    
+
     # Создаём .env автоматически, если его нет
     if [[ ! -f "$ENV_FILE" ]]; then
         cat > "$ENV_FILE" <<EOF
@@ -694,33 +769,43 @@ EOF
     fi
 
     load_env
+    validate_required_secrets
     mkdir -p "$CONFIG_ROOT"/{config/couchdb,data/{couchdb,radicale,syncthing,searxng,luanti/config},backups}
     mkdir -p "$CONFIG_ROOT"/config/nginx/{conf.d,stream.d,htpasswd,certs}
 
     gen_compose
+    docker compose -f "$COMPOSE_FILE" config >/dev/null 2>&1 || die "docker compose config завершился с ошибкой — проверьте .env и compose файл"
     log "Подготовка завершена. Секреты в $ENV_FILE (права 600)."
     warn "Дальше: пункт 3 (nginx и сертификаты: сначала установка nginx, затем сертификаты, затем запуск)."
     warn "Не забудьте: A-записи поддоменов -> ваш статический IP, проброс 80/443 на роутере."
 }
 
-ensure_prepared() { [[ -f "$ENV_FILE" && -f "$COMPOSE_FILE" ]] || { warn "Сначала выполните пункт 2 (подготовка)."; prep_system; }; load_env; }
+ensure_prepared() { [[ -f "$ENV_FILE" && -f "$COMPOSE_FILE" ]] || { warn "Сначала выполните пункт 2 (подготовка)."; prep_system; }; load_env; validate_required_secrets; }
 
 # Проверка зависимостей перед установкой сервиса
 check_dependencies() {
     local missing=()
-    
-    if ! command -v docker >/dev/null 2>&1; then
-        missing+=("Docker")
+
+    if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+        missing+=("Docker daemon (docker info не отвечает)")
     fi
-    
-    if ! command -v nginx >/dev/null 2>&1; then
+
+    if ! docker compose version >/dev/null 2>&1; then
+        missing+=("docker compose plugin")
+    fi
+
+    if ! command -v nginx >/dev/null 2>&1 || ! systemctl is-active --quiet nginx; then
         missing+=("nginx (пункт меню: nginx и сертификаты → Установить nginx на хост)")
     fi
-    
-    if [[ ! -f "$CONFIG_ROOT/config/nginx/certs/fullchain.pem" ]]; then
+
+    if [[ ! -f "$CONFIG_ROOT/config/nginx/certs/fullchain.pem" || ! -f "$CONFIG_ROOT/config/nginx/certs/privkey.pem" ]]; then
         missing+=("SSL-сертификаты (пункт меню: nginx и сертификаты → Сертификаты)")
     fi
-    
+
+    if ! docker compose -f "$COMPOSE_FILE" config >/dev/null 2>&1; then
+        missing+=("docker compose config (проверьте .env, compose файл и переменные)" )
+    fi
+
     if [[ ${#missing[@]} -gt 0 ]]; then
         echo ""
         echo "${c_mag}=== Отсутствуют необходимые компоненты ===${c_off}"
@@ -737,7 +822,7 @@ show_connection_info() {
     local service="$1"
     shift
     local params=("$@")
-    
+
     echo ""
     echo "${c_mag}=== Параметры подключения: $service ===${c_off}"
     for param in "${params[@]}"; do
@@ -754,7 +839,7 @@ log_connection_params() {
     shift
     local params=("$@")
     local params_file="$CONFIG_ROOT/connection_params.txt"
-    
+
     {
         echo "=== $service ($(date '+%Y-%m-%d %H:%M:%S')) ==="
         for param in "${params[@]}"; do
@@ -762,7 +847,7 @@ log_connection_params() {
         done
         echo ""
     } >> "$params_file"
-    
+
     chmod 600 "$params_file"
     log "Параметры сохранены в: $params_file"
 }
@@ -776,17 +861,27 @@ wait_container() {
     local cmd=("$@")
     local max_attempts=30
     local attempt=1
-    
+
     log "Ожидание готовности контейнера $container..."
+
     while [[ $attempt -le $max_attempts ]]; do
-        if docker compose exec -T "$container" "${cmd[@]}" >/dev/null 2>&1; then
-            log "Контейнер $container готов (попытка $attempt/$max_attempts)"
-            return 0
+        if ! docker compose ps "$container" >/dev/null 2>&1; then
+            warn "Контейнер $container ещё не создан/не существует — проверка отменена."
+            return 1
         fi
+
+        if docker compose ps "$container" 2>/dev/null | grep -q "Up"; then
+            if docker compose exec -T "$container" "${cmd[@]}" >/dev/null 2>&1; then
+                log "Контейнер $container готов (попытка $attempt/$max_attempts)"
+                return 0
+            fi
+        fi
+
         sleep 2
         ((attempt++))
     done
-    
+
     warn "Контейнер $container не готов после $max_attempts попыток"
     return 1
 }
+
