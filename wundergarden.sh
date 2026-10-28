@@ -39,7 +39,7 @@ banner() {
         printf '%s  W U N D E R G A R D E N%s\n' "$c_mag" "$c_off"
         return 0
     fi
-    cat <<'BAN'
+    cat <<BAN
 ${c_mag}                                                                          
                        ▄▄                                  ▄▄             
                        ██                                  ██             
@@ -733,38 +733,6 @@ abuse_block_setup() {
 #!/usr/bin/env bash
 set -euo pipefail
 URL="$url"
-TMP="
-");
-EOF
-
-    cat > "$script" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-URL="$url"
-TMP="
-");
-EOF
-
-    cat > "$script" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-URL="$url"
-TMP="
-");
-EOF
-
-    cat > "$script" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-URL="$url"
-TMP="
-");
-EOF
-
-    cat > "$script" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-URL="$url"
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
 
@@ -911,7 +879,7 @@ EOF
     else
         warn "Ошибка применения блокировки"
         rm -f "$script"
-        read -rp "Enter — прод��лжить " _ || true
+        read -rp "Enter — продолжить " _ || true
         return 1
     fi
 
