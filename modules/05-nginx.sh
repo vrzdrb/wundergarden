@@ -123,6 +123,13 @@ stream {
 }
 NGXEOF
 
+    # IPv6 может быть отключён на хосте — тогда listen на [::] приведёт
+    # к ошибке bind() и nginx -t не пройдёт. Убираем IPv6-строки.
+    if [[ ! -f /proc/net/if_inet6 ]]; then
+        sed -i '/listen \[::/d' "$NGINX_CONF"
+        log "IPv6 не обнаружен — IPv6-директивы listen удалены из конфига"
+    fi
+
     # Создаём базовые include-файлы
     cat > "$NGINX_CONFIG_DIR/proxy_common.conf" <<'NGXEOF'
 proxy_set_header Host $host;
