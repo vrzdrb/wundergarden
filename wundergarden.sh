@@ -269,15 +269,10 @@ configure_password_policy() {
     read -rp "Номер: " c || true
     case "$c" in
         1)
-            # Устанавливаем libpam-pwquality
             apt-get install -y libpam-pwquality
-            
-            # Настраиваем /etc/pam.d/common-password
             local pam_file="/etc/pam.d/common-password"
             sed -i '/pam_pwquality.so/d' "$pam_file"
             echo 'password requisite pam_pwquality.so retry=3 minlen=12 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 enforce_for_root' >> "$pam_file"
-            
-            # Настраиваем /etc/security/pwquality.conf
             cat > /etc/security/pwquality.conf <<EOF
 # Минимальная длина пароля
 minlen = 12
@@ -290,10 +285,7 @@ dcredit = -1
 # Требовать хотя бы один специальный символ
 ocredit = -1
 EOF
-            
-            # Применяем изменения
             pam-auth-update --force
-            
             log "Политика паролей настроена и активирована"
             log "Требования: мин. 12 символов, заглавная, строчная, цифра, спецсимвол"
             read -rp "Enter — продолжить " _ || true ;;
@@ -332,13 +324,11 @@ ssh_settings_menu() {
     local SSHD_CONFIG="/etc/ssh/sshd_config"
     local SSH_CONFIG="/etc/ssh/ssh_config"
     
-    # Создаём бэкап основного конфига при первом запуске
     if [[ ! -f /etc/ssh/sshd_config.backup_wundergarden ]]; then
         cp "$SSHD_CONFIG" /etc/ssh/sshd_config.backup_wundergarden
         log "Создан бэкап: /etc/ssh/sshd_config.backup_wundergarden"
     fi
     
-    # Удаляем конфликтующие файлы из sshd_config.d
     for f in /etc/ssh/sshd_config.d/*-billpanel.conf /etc/ssh/sshd_config.d/50-cloud-init.conf; do
         if [[ -f "$f" ]]; then
             rm -f "$f"
@@ -346,19 +336,14 @@ ssh_settings_menu() {
         fi
     done
     
-    # Отключаем небезопасные настройки в основном sshd_config
     if [[ -f "$SSHD_CONFIG" ]]; then
-        # Комментируем PermitRootLogin
         sed -i 's/^PermitRootLogin/#PermitRootLogin/' "$SSHD_CONFIG"
-        # Комментируем PasswordAuthentication
         sed -i 's/^PasswordAuthentication/#PasswordAuthentication/' "$SSHD_CONFIG"
-        # Отключаем X11Forwarding
         if grep -q "^X11Forwarding" "$SSHD_CONFIG"; then
             sed -i 's/^X11Forwarding.*/X11Forwarding no/' "$SSHD_CONFIG"
         else
             echo "X11Forwarding no" >> "$SSHD_CONFIG"
         fi
-        # Отключаем GSSAPIAuthentication
         if grep -q "^GSSAPIAuthentication" "$SSHD_CONFIG"; then
             sed -i 's/^GSSAPIAuthentication.*/GSSAPIAuthentication no/' "$SSHD_CONFIG"
         else
@@ -366,7 +351,6 @@ ssh_settings_menu() {
         fi
     fi
     
-    # Отключаем GSSAPIAuthentication в ssh_config
     if [[ -f "$SSH_CONFIG" ]]; then
         if grep -q "^GSSAPIAuthentication" "$SSH_CONFIG"; then
             sed -i 's/^GSSAPIAuthentication.*/GSSAPIAuthentication no/' "$SSH_CONFIG"
@@ -375,10 +359,8 @@ ssh_settings_menu() {
         fi
     fi
     
-    # Убеждаемся, что Include директива есть в sshd_config
     if [[ -f "$SSHD_CONFIG" ]]; then
         if ! grep -q "^Include /etc/ssh/sshd_config.d" "$SSHD_CONFIG"; then
-            # Добавляем Include в начало файла (после комментариев)
             local temp_file=$(mktemp)
             awk '
                 /^#/ { print; next }
@@ -417,23 +399,19 @@ ssh_settings_menu() {
                 ufw allow "$new_port/tcp" comment 'SSH' >/dev/null 2>&1 && log "UFW: порт $new_port/tcp открыт" || warn "Ошибка UFW"
                 ufw reload >/dev/null 2>&1 && log "UFW перезапущен" || warn "Ошибка перезапуска UFW"
                 
-                # Меняем только порт, не трогая остальные настройки
                 local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
                 mkdir -p /etc/ssh/sshd_config.d
                 
                 if [[ -f "$cfg" ]]; then
-                    # Конфиг существует - обновляем только порт
                     if grep -q "^Port " "$cfg" 2>/dev/null; then
                         sed -i "s|^Port .*|Port $new_port|" "$cfg"
                     else
                         echo "Port $new_port" >> "$cfg"
                     fi
                 else
-                    # Конфига нет - создаём минимальный только с портом
                     echo "Port $new_port" > "$cfg"
                 fi
                 
-                # Проверяем синтаксис
                 if sshd -t 2>/dev/null; then
                     if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
                         log "SSH перезапущен, порт: $new_port"
@@ -455,11 +433,7 @@ ssh_settings_menu() {
                 local username; username=$(ask "Имя пользователя" "")
                 [[ -z "$username" ]] && continue
                 id "$username" >/dev/null 2>&1 || { warn "пользователь не найден"; continue; }
-                
-                # Получаем домашнюю директорию пользователя
                 local user_home=$(getent passwd "$username" | cut -d: -f6)
-                
-                # Создаём директорию .ssh с правильными правами
                 mkdir -p "$user_home/.ssh"
                 chmod 700 "$user_home/.ssh"
                 touch "$user_home/.ssh/authorized_keys"
@@ -467,7 +441,6 @@ ssh_settings_menu() {
                 chown -R "$username:$username" "$user_home/.ssh"
                 log "Создана директория $user_home/.ssh с правильными правами"
                 
-                # Убеждаемся, что PubkeyAuthentication включён
                 local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
                 mkdir -p /etc/ssh/sshd_config.d
                 
@@ -476,7 +449,6 @@ ssh_settings_menu() {
                         echo "PubkeyAuthentication yes" >> "$cfg"
                     fi
                 else
-                    # Создаём базовый конфиг с включённой аутентификацией по ключу
                     local port=$(get_ssh_port)
                     cat > "$cfg" <<EOF
 Port $port
@@ -496,7 +468,6 @@ KerberosAuthentication no
 EOF
                 fi
                 
-                # Перезапускаем SSH для применения настроек
                 if sshd -t 2>/dev/null; then
                     if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
                         log "SSH перезапущен, аутентификация по ключу включена"
@@ -539,16 +510,13 @@ EOF
                     new_pass_auth="yes"
                 fi
                 
-                # Меняем только PasswordAuthentication, не трогая остальные настройки
                 if [[ -f "$cfg" ]]; then
-                    # Конфиг существует - обновляем только PasswordAuthentication
                     if grep -q "^PasswordAuthentication" "$cfg" 2>/dev/null; then
                         sed -i "s|^PasswordAuthentication .*|PasswordAuthentication $new_pass_auth|" "$cfg"
                     else
                         echo "PasswordAuthentication $new_pass_auth" >> "$cfg"
                     fi
                 else
-                    # Конфига нет - создаём полный конфиг безопасности
                     cat > "$cfg" <<EOF
 Port $port
 PermitRootLogin prohibit-password
@@ -567,7 +535,6 @@ KerberosAuthentication no
 EOF
                 fi
                 
-                # Проверяем синтаксис
                 if sshd -t 2>/dev/null; then
                     if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
                         log "Вход по паролю $(if [[ "$new_pass_auth" == "no" ]]; then echo "отключён"; else echo "включён"; fi), SSH перезапущен"
@@ -593,16 +560,13 @@ EOF
                     *) new_val="prohibit-password" ;;
                 esac
                 
-                # Меняем только PermitRootLogin, не трогая остальные настройки
                 if [[ -f "$cfg" ]]; then
-                    # Конфиг существует - обновляем только PermitRootLogin
                     if grep -q "^PermitRootLogin" "$cfg" 2>/dev/null; then
                         sed -i "s|^PermitRootLogin .*|PermitRootLogin $new_val|" "$cfg"
                     else
                         echo "PermitRootLogin $new_val" >> "$cfg"
                     fi
                 else
-                    # Конфига нет - создаём полный конфиг безопасности
                     cat > "$cfg" <<EOF
 Port $port
 PermitRootLogin $new_val
@@ -621,7 +585,6 @@ KerberosAuthentication no
 EOF
                 fi
                 
-                # Проверяем синтаксис
                 if sshd -t 2>/dev/null; then
                     if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
                         log "PermitRootLogin установлен в $new_val, SSH перезапущен"
@@ -637,28 +600,19 @@ EOF
             5)
                 echo "${c_mag}=== Проверка и исправление прав на SSH-ключи ===${c_off}"
                 echo ""
-                
-                # Получаем список пользователей с UID >= 1000
                 local users=$(awk -F: '$3 >= 1000 && $3 < 65000 {print $1":"$6}' /etc/passwd)
-                
                 if [[ -z "$users" ]]; then
                     warn "Не найдено пользователей с UID >= 1000"
                     read -rp "Enter — продолжить " _ || true
                     continue
                 fi
-                
                 local fixed_count=0
-                
                 while IFS=: read -r username user_home; do
                     echo "${c_txt}Проверка пользователя: $username${c_off}"
-                    
-                    # Проверяем наличие .ssh директории
                     if [[ ! -d "$user_home/.ssh" ]]; then
                         echo "  ${c_txt}⚠ Директория .ssh отсутствует${c_off}"
                         continue
                     fi
-                    
-                    # Проверяем права на .ssh
                     local ssh_perms=$(stat -c "%a" "$user_home/.ssh" 2>/dev/null)
                     if [[ "$ssh_perms" != "700" ]]; then
                         echo "  ${c_txt}⚠ Неправильные права на .ssh: $ssh_perms (должно быть 700)${c_off}"
@@ -668,8 +622,6 @@ EOF
                     else
                         echo "  ${c_txt}✓ Права на .ssh корректны (700)${c_off}"
                     fi
-                    
-                    # Проверяем владельца .ssh
                     local ssh_owner=$(stat -c "%U:%G" "$user_home/.ssh" 2>/dev/null)
                     if [[ "$ssh_owner" != "$username:$username" ]]; then
                         echo "  ${c_txt}⚠ Неправильный владелец .ssh: $ssh_owner (должно быть $username:$username)${c_off}"
@@ -679,8 +631,6 @@ EOF
                     else
                         echo "  ${c_txt}✓ Владелец .ssh корректен${c_off}"
                     fi
-                    
-                    # Проверяем authorized_keys
                     if [[ -f "$user_home/.ssh/authorized_keys" ]]; then
                         local key_perms=$(stat -c "%a" "$user_home/.ssh/authorized_keys" 2>/dev/null)
                         if [[ "$key_perms" != "600" ]]; then
@@ -691,7 +641,6 @@ EOF
                         else
                             echo "  ${c_txt}✓ Права на authorized_keys корректны (600)${c_off}"
                         fi
-                        
                         local key_owner=$(stat -c "%U:%G" "$user_home/.ssh/authorized_keys" 2>/dev/null)
                         if [[ "$key_owner" != "$username:$username" ]]; then
                             echo "  ${c_txt}⚠ Неправильный владелец authorized_keys: $key_owner${c_off}"
@@ -701,23 +650,19 @@ EOF
                         else
                             echo "  ${c_txt}✓ Владелец authorized_keys корректен${c_off}"
                         fi
-                        
                         local key_count=$(wc -l < "$user_home/.ssh/authorized_keys" 2>/dev/null | tr -d ' ')
                         echo "  ${c_txt}ℹ Количество ключей: $key_count${c_off}"
                     else
                         echo "  ${c_txt}⚠ Файл authorized_keys отсутствует${c_off}"
                     fi
-                    
                     echo ""
                 done <<< "$users"
-                
                 if [[ $fixed_count -gt 0 ]]; then
                     log "Исправлено проблем: $fixed_count"
                     log "Перезапустите SSH для применения изменений"
                 else
                     log "Все права на SSH-ключи корректны"
                 fi
-                
                 read -rp "Enter — продолжить " _ || true ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
@@ -729,32 +674,23 @@ change_ssh_port_direct() {
     clear
     require_cmd ufw ufw
     local port=$(get_ssh_port)
-    
     echo "${c_mag}=== Изменить SSH-порт ===${c_off}"
     echo "${c_txt}Текущий порт: $port${c_off}"
-    local new_port; new_port=$(ask "Новый SSH-порт" "$port")
+    local new_port; new_port=$(ask "Н��вый SSH-порт" "$port")
     [[ "$new_port" =~ ^[0-9]+$ && "$new_port" -ge 1 && "$new_port" -le 65535 ]] || { warn "некорректный порт"; return; }
-    
     ufw allow "$new_port/tcp" comment 'SSH' >/dev/null 2>&1 && log "UFW: порт $new_port/tcp открыт" || warn "Ошибка UFW"
     ufw reload >/dev/null 2>&1 && log "UFW перезапущен" || warn "Ошибка перезапуска UFW"
-    
-    # Меняем только порт, не трогая остальные настройки
     local cfg=/etc/ssh/sshd_config.d/99-homeserver.conf
     mkdir -p /etc/ssh/sshd_config.d
-    
     if [[ -f "$cfg" ]]; then
-        # Конфиг существует - обновляем только порт
         if grep -q "^Port " "$cfg" 2>/dev/null; then
             sed -i "s|^Port .*|Port $new_port|" "$cfg"
         else
             echo "Port $new_port" >> "$cfg"
         fi
     else
-        # Конфига нет - создаём минимальный только с портом
         echo "Port $new_port" > "$cfg"
     fi
-    
-    # Проверяем синтаксис
     if sshd -t 2>/dev/null; then
         if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
             log "SSH перезапущен, порт: $new_port"
@@ -772,6 +708,42 @@ change_ssh_port_direct() {
         fi
     fi
     read -rp "Enter — продолжить " _ || true
+}
+
+is_reserved_ipv4_cidr() {
+    local cidr="${1:-}"
+    case "$cidr" in
+        0.0.0.0/8|10.0.0.0/8|100.64.0.0/10|127.0.0.0/8|169.254.0.0/16|172.16.0.0/12|192.0.0.0/24|192.168.0.0/16|198.18.0.0/15|224.0.0.0/4|240.0.0.0/4)
+            return 0 ;;
+        *)
+            return 1 ;;
+    esac
+}
+
+get_default_external_iface() {
+    ip route show default 2>/dev/null | awk 'NR==1 {print $5; exit}' || true
+}
+
+append_ipset_rule_on_external_iface() {
+    local set_name="$1"
+    local iface
+    iface="$(get_default_external_iface)"
+    [[ -n "$iface" ]] || return 0
+
+    iptables -C INPUT -i "$iface" -m set --match-set "$set_name" src -j DROP 2>/dev/null || \
+    iptables -I INPUT 1 -i "$iface" -m set --match-set "$set_name" src -j DROP 2>/dev/null || true
+
+    iptables -C DOCKER-USER -m set --match-set "$set_name" src -j DROP 2>/dev/null || \
+    iptables -I DOCKER-USER 1 -m set --match-set "$set_name" src -j DROP 2>/dev/null || true
+}
+
+validate_ipset_no_private_ranges() {
+    local set_name="$1"
+    if ipset save "$set_name" 2>/dev/null | grep -Eq '(0\.0\.0\.0/8|10\.0\.0\.0/8|127\.0\.0\.0/8|172\.16\.0\.0/12|192\.168\.0\.0/16|169\.254\.0\.0/16|198\.18\.0\.0/15)'; then
+        warn "$set_name содержит частные/резервные CIDR — загрузка отменена"
+        return 1
+    fi
+    return 0
 }
 
 ufw_settings_menu() {
@@ -836,24 +808,53 @@ abuse_block_setup() {
         3) url="https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level2.netset" ;;
         *) url="https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/dshield.netset" ;;
     esac
-    cat > "$script" <<ABEOF
+    cat > "$script" <<'ABEOF'
 #!/usr/bin/env bash
-URL="$url"
-TMP="\$(mktemp)"
-curl -fsSL --max-time 300 "\$URL" -o "\$TMP" || { echo "Ошибка загрузки"; exit 1; }
+set -e
+URL="__URL__"
+TMP="$(mktemp)"
+iface="$(ip route show default 2>/dev/null | awk 'NR==1 {print $5; exit}' || true)"
+
+is_reserved_ipv4_cidr() {
+    case "$1" in
+        0.0.0.0/8|10.0.0.0/8|100.64.0.0/10|127.0.0.0/8|169.254.0.0/16|172.16.0.0/12|192.0.0.0/24|192.168.0.0/16|198.18.0.0/15|224.0.0.0/4|240.0.0.0/4)
+            return 0 ;;
+        *)
+            return 1 ;;
+    esac
+}
+
+curl -fsSL --max-time 300 "$URL" -o "$TMP" || { echo "Ошибка загрузки"; exit 1; }
 ipset create abuse4_tmp hash:net 2>/dev/null || true
-grep -E '^[0-9]' "\$TMP" | sed 's/^/add abuse4_tmp /' | ipset restore 2>/dev/null || true
+while IFS= read -r cidr; do
+    [[ -z "$cidr" || "$cidr" =~ ^# ]] && continue
+    [[ "$cidr" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]] || continue
+    is_reserved_ipv4_cidr "$cidr" && continue
+    ipset add abuse4_tmp "$cidr" 2>/dev/null || true
+done < "$TMP"
+if ipset save abuse4_tmp 2>/dev/null | grep -Eq '(0\.0\.0\.0/8|10\.0\.0\.0/8|127\.0\.0\.0/8|172\.16\.0\.0/12|192\.168\.0\.0/16|169\.254\.0\.0/16|198\.18\.0\.0/15)'; then
+    echo "abuse4 содержит частные/резервные CIDR — загрузка отменена"
+    ipset destroy abuse4_tmp 2>/dev/null || true
+    rm -f "$TMP"
+    exit 1
+fi
 ipset create abuse4 hash:net 2>/dev/null || true
 ipset swap abuse4_tmp abuse4 2>/dev/null || true
 ipset destroy abuse4_tmp 2>/dev/null || true
-rm -f "\$TMP"
-iptables -C INPUT -m set --match-set abuse4 src -j DROP 2>/dev/null || iptables -I INPUT 1 -m set --match-set abuse4 src -j DROP 2>/dev/null || true
+rm -f "$TMP"
+
+if [[ -n "$iface" ]]; then
+    iptables -C INPUT -i "$iface" -m set --match-set abuse4 src -j DROP 2>/dev/null || iptables -I INPUT 1 -i "$iface" -m set --match-set abuse4 src -j DROP 2>/dev/null || true
+else
+    iptables -C INPUT -m set --match-set abuse4 src -j DROP 2>/dev/null || iptables -I INPUT 1 -m set --match-set abuse4 src -j DROP 2>/dev/null || true
+fi
 iptables -C DOCKER-USER -m set --match-set abuse4 src -j DROP 2>/dev/null || iptables -I DOCKER-USER 1 -m set --match-set abuse4 src -j DROP 2>/dev/null || true
 ABEOF
+    sed -i "s|__URL__|$url|" "$script"
     chmod +x "$script"
     if "$script"; then
         printf '@reboot root /opt/homeserver/abuse-block.sh\n17 4 * * * root /opt/homeserver/abuse-block.sh\n' > "$cron"
-        log "Применён"
+        log "Приме��ён"
         require_cmd ufw ufw
         ufw reload >/dev/null 2>&1 && log "UFW перезапущен"
     else
@@ -876,29 +877,59 @@ block_rkn() {
     local script="$CONFIG_ROOT/rkn-block.sh"
     cat > "$script" <<'EOF'
 #!/usr/bin/env bash
+set -e
 cd /opt/homeserver
+iface="$(ip route show default 2>/dev/null | awk 'NR==1 {print $5; exit}' || true)"
+
+is_reserved_ipv4_cidr() {
+    case "$1" in
+        0.0.0.0/8|10.0.0.0/8|100.64.0.0/10|127.0.0.0/8|169.254.0.0/16|172.16.0.0/12|192.0.0.0/24|192.168.0.0/16|198.18.0.0/15|224.0.0.0/4|240.0.0.0/4)
+            return 0 ;;
+        *)
+            return 1 ;;
+    esac
+}
+
 wget -q -O blacklist.txt https://raw.githubusercontent.com/C24Be/AS_Network_List/main/blacklists/blacklist.txt
 if [[ ! -f blacklist.txt ]]; then
     echo "Файл blacklist.txt не найден!"
     exit 1
 fi
+
 echo "Создание ipset списка..."
 ipset create rkn4_tmp hash:net 2>/dev/null || true
 count=0
 while read -r subnet; do
     [[ -z "$subnet" || "$subnet" =~ ^# ]] && continue
+    [[ "$subnet" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]] || continue
+    is_reserved_ipv4_cidr "$subnet" && continue
     ipset add rkn4_tmp "$subnet" 2>/dev/null || true
     ((count++)) || true
 done < blacklist.txt
+
 echo "Загружено подсетей: $count"
+if ipset save rkn4_tmp 2>/dev/null | grep -Eq '(0\.0\.0\.0/8|10\.0\.0\.0/8|127\.0\.0\.0/8|172\.16\.0\.0/12|192\.168\.0\.0/16|169\.254\.0\.0/16|198\.18\.0\.0/15)'; then
+    echo "rkn4 содержит частные/резервные CIDR — загрузка отменена"
+    ipset destroy rkn4_tmp 2>/dev/null || true
+    rm -f blacklist.txt
+    exit 1
+fi
+
 echo "Активация списка..."
 ipset create rkn4 hash:net 2>/dev/null || true
 ipset swap rkn4_tmp rkn4 2>/dev/null || true
 ipset destroy rkn4_tmp 2>/dev/null || true
-    echo "Применение правил iptables..."
-    iptables -C INPUT -m set --match-set rkn4 src -j DROP 2>/dev/null || iptables -I INPUT 1 -m set --match-set rkn4 src -j DROP
-    iptables -C DOCKER-USER -m set --match-set rkn4 src -j DROP 2>/dev/null || iptables -I DOCKER-USER 1 -m set --match-set rkn4 src -j DROP 2>/dev/null || true
-    echo "Готово!"EOF
+
+echo "Применение правил iptables..."
+if [[ -n "$iface" ]]; then
+    iptables -C INPUT -i "$iface" -m set --match-set rkn4 src -j DROP 2>/dev/null || iptables -I INPUT 1 -i "$iface" -m set --match-set rkn4 src -j DROP 2>/dev/null || true
+else
+    iptables -C INPUT -m set --match-set rkn4 src -j DROP 2>/dev/null || iptables -I INPUT 1 -m set --match-set rkn4 src -j DROP 2>/dev/null || true
+fi
+iptables -C DOCKER-USER -m set --match-set rkn4 src -j DROP 2>/dev/null || iptables -I DOCKER-USER 1 -m set --match-set rkn4 src -j DROP 2>/dev/null || true
+
+echo "Готово!"
+EOF
     chmod +x "$script"
     
     echo "${c_txt}Запускаем rkn-block.sh...${c_off}"
@@ -911,7 +942,6 @@ ipset destroy rkn4_tmp 2>/dev/null || true
         return 0
     fi
     
-    # Добавляем в crontab для ежедневного обновления
     if ! crontab -l 2>/dev/null | grep -q "rkn-block.sh"; then
         (crontab -l 2>/dev/null; echo "0 3 * * * $script") | crontab -
         log "Задание добавлено в crontab для ежедневного выполнения в 3:00"
@@ -1061,10 +1091,7 @@ fail2ban_menu() {
     
     while true; do
         clear
-        # Получаем статус fail2ban
         local f2b_status=$(systemctl is-active fail2ban 2>/dev/null || echo "inactive")
-        
-        # Читаем текущие настройки из jail.local
         local bantime="3600" maxretry="5" findtime="600" current_ports=""
         if [[ -f "$jail_file" ]]; then
             bantime=$(grep -E "^bantime\s*=" "$jail_file" | head -n 1 | cut -d'=' -f2 | tr -d ' ' || echo "3600")
@@ -1074,7 +1101,6 @@ fail2ban_menu() {
         fi
         
         echo "${c_mag}=== Fail2ban ===${c_off}"
-        # Показываем статус: настроен только если есть jail.local
         if [[ -f "$jail_file" && "$f2b_status" == "active" ]]; then
             echo "${c_txt}Статус: настроен и активен${c_off}"
         elif [[ -f "$jail_file" ]]; then
@@ -1084,25 +1110,18 @@ fail2ban_menu() {
         fi
         echo ""
         echo "${c_txt}Порты, используемые приложениями:${c_off}"
-        
-        # Получаем список слушающих портов
         require_cmd ss iproute2
         local listening_ports=$(ss -tlnp 2>/dev/null | awk 'NR>1 {print $4}' | grep -oE '[0-9]+$' | sort -un)
-        
         if [[ -n "$listening_ports" ]]; then
             printf "  %-15s %s\n" "Порт" "Процесс"
             printf "  %-15s %s\n" "---" "---"
-            
             for port in $listening_ports; do
-                # Получаем имя процесса для порта
                 local process=$(ss -tlnp 2>/dev/null | grep ":${port} " | grep -oP 'users:\(\("\K[^"]+' | head -1 || echo "unknown")
-                
                 printf "  %-15s %s\n" "${port}/tcp" "$process"
             done
         else
             echo "${c_txt}  (нет слушающих портов)${c_off}"
         fi
-        
         echo ""
         echo "${c_txt}Текущие настройки:${c_off}"
         echo "${c_txt}  bantime: ${bantime}с${c_off}"
@@ -1121,13 +1140,11 @@ fail2ban_menu() {
         read -rp "Номер: " c || true
         case "$c" in
             1)
-                # Установка/переустановка Fail2ban (из vps_autosetup)
                 local ssh_port=$(get_ssh_port)
                 echo "${c_txt}Текущий порт SSH: $ssh_port${c_off}"
                 local ports_input; ports_input=$(ask "Введите порты для защиты через запятую (например, $ssh_port,80,443)" "$ssh_port")
                 local maxretry_input; maxretry_input=$(ask "Введите максимальное число неудачных попыток (maxretry)" "5")
                 local bantime_input; bantime_input=$(ask "Введите время блокировки в секундах (bantime)" "3600")
-                
                 cat > "$jail_file" <<-JAIL_EOF
 [DEFAULT]
 ignoreip = 127.0.0.1/8 ::1
@@ -1142,22 +1159,18 @@ filter = sshd
 logpath = /var/log/auth.log
 maxretry = $maxretry_input
 JAIL_EOF
-                
                 systemctl enable fail2ban
                 systemctl restart fail2ban
                 log "Fail2ban установлен и настроен на порты: $ports_input"
                 read -rp "Enter — продолжить " _ || true ;;
             2)
-                # Изменение портов (из vps_autosetup)
                 if [[ ! -f "$jail_file" ]]; then
                     warn "Fail2ban не установлен. Сначала выполните пункт 1"
                     read -rp "Enter — продолжить " _ || true
                     continue
                 fi
-                
                 echo "${c_txt}Текущие порты: ${current_ports:-не указаны}${c_off}"
                 local new_ports; new_ports=$(ask "Введите новые порты для защиты через запятую (например, 2222,80,443)" "")
-                
                 if [[ -z "$new_ports" ]]; then
                     warn "Ввод пустой, изменения отменены"
                     read -rp "Нажмите Enter для продолжения " _ || true
@@ -1172,13 +1185,11 @@ JAIL_EOF
                 fi
                 read -rp "Enter — продолжить " _ || true ;;
             3)
-                # Изменить bantime
                 if [[ ! -f "$jail_file" ]]; then
                     warn "Fail2ban не установлен. Сначала выполните пункт 1"
                     read -rp "Enter — продолжить " _ || true
                     continue
                 fi
-                
                 local new_bantime; new_bantime=$(ask "Введите bantime в секундах" "$bantime")
                 if grep -q "^bantime\s*=" "$jail_file"; then
                     sed -i "s/^bantime\s*=.*/bantime = $new_bantime/" "$jail_file"
@@ -1187,13 +1198,11 @@ JAIL_EOF
                 log "bantime обновлён на: $new_bantime"
                 read -rp "Enter — продолжить " _ || true ;;
             4)
-                # Изменить maxretry
                 if [[ ! -f "$jail_file" ]]; then
                     warn "Fail2ban не установлен. Сначала выполните пункт 1"
                     read -rp "Enter — продолжить " _ || true
                     continue
                 fi
-                
                 local new_maxretry; new_maxretry=$(ask "Введите maxretry" "$maxretry")
                 if grep -q "^maxretry\s*=" "$jail_file"; then
                     sed -i "s/^maxretry\s*=.*/maxretry = $new_maxretry/" "$jail_file"
@@ -1202,13 +1211,11 @@ JAIL_EOF
                 log "maxretry обновлён на: $new_maxretry"
                 read -rp "Enter — продолжить " _ || true ;;
             5)
-                # Изменить findtime
                 if [[ ! -f "$jail_file" ]]; then
                     warn "Fail2ban не установлен. Сначала выполните пункт 1"
                     read -rp "Enter — продолжить " _ || true
                     continue
                 fi
-                
                 local new_findtime; new_findtime=$(ask "Введите findtime в секундах" "$findtime")
                 if grep -q "^findtime\s*=" "$jail_file"; then
                     sed -i "s/^findtime\s*=.*/findtime = $new_findtime/" "$jail_file"
@@ -1225,23 +1232,17 @@ JAIL_EOF
 setup_dns_netplan() {
     clear
     echo "${c_mag}=== Настройка DNS (netplan + systemd-resolved) ===${c_off}"
-    
-    # Проверка зависимостей
     require_cmd python3 python3
     require_cmd netplan netplan.io
-    
     if ! python3 -c 'import yaml' 2>/dev/null; then
         warn "Нужен python3-yaml"
         apt-get install -y python3-yaml
     fi
-    
     if ! systemctl list-unit-files systemd-resolved.service >/dev/null 2>&1; then
         die "systemd-resolved не найден"
     fi
-    
     local NETPLAN_FILE="/etc/netplan/50-cloud-init.yaml"
     [[ -f "$NETPLAN_FILE" ]] || { warn "Не найден $NETPLAN_FILE"; read -rp "Нажмите Enter для продолжения " _ || true; return 1; }
-    
     local DNS_SERVERS=(1.1.1.1 9.9.9.9 8.8.8.8)
     local SEARCH_DOMAINS=(netgrid.host)
     local RESOLVED_DROPIN_DIR="/etc/systemd/resolved.conf.d"
@@ -1252,8 +1253,6 @@ setup_dns_netplan() {
     local BACKUP_DONE=0
     local NETPLAN_CHANGED=0
     local RESOLVED_CHANGED=0
-    
-    # Бэкап создаётся лениво: только перед первым реальным изменением
     backup() {
         if [[ $BACKUP_DONE -eq 1 ]]; then return 0; fi
         log "Бэкап в $BACKUP_DIR"
@@ -1270,13 +1269,10 @@ setup_dns_netplan() {
         fi
         BACKUP_DONE=1
     }
-    
-    # --- 1. systemd-resolved drop-in ---
     local DROPIN_CONTENT="[Resolve]
 DNS=${DNS_SERVERS[*]}
 LLMNR=no
 MulticastDNS=no"
-    
     if [[ -f "$RESOLVED_DROPIN" && "$(cat "$RESOLVED_DROPIN")" == "$DROPIN_CONTENT" ]]; then
         skip "$RESOLVED_DROPIN без изменений"
     else
@@ -1287,18 +1283,13 @@ MulticastDNS=no"
         chmod 644 "$RESOLVED_DROPIN"
         RESOLVED_CHANGED=1
     fi
-    
-    # --- 2. netplan: nameservers.addresses + search ---
     local TMP_NETPLAN="$(mktemp)"
-    
     local RESULT=$(python3 - "$NETPLAN_FILE" "$TMP_NETPLAN" "${DNS_SERVERS[*]}" "${SEARCH_DOMAINS[*]}" <<'PY'
 import sys, copy, yaml
 path, out, dns, search = sys.argv[1], sys.argv[2], sys.argv[3].split(), sys.argv[4].split()
-
 with open(path) as f:
     data = yaml.safe_load(f)
 orig = copy.deepcopy(data)
-
 net = data.setdefault("network", {})
 for section in ("ethernets", "bonds", "bridges", "vlans"):
     for name, cfg in (net.get(section) or {}).items():
@@ -1316,7 +1307,6 @@ for section in ("ethernets", "bonds", "bridges", "vlans"):
             merged = list(cur) + [d for d in search if d not in cur]
             if merged:
                 ns["search"] = merged
-
 if data == orig:
     print("UNCHANGED")
 else:
@@ -1325,7 +1315,6 @@ else:
     print("CHANGED")
 PY
 )
-    
     if [[ "$RESULT" == "CHANGED" ]]; then
         backup
         log "Обновляю $NETPLAN_FILE"
@@ -1338,8 +1327,6 @@ PY
     fi
     chmod 600 /etc/netplan/*.yaml 2>/dev/null || true
     rm -f "$TMP_NETPLAN"
-    
-    # --- 3. cloud-init: не перезаписывать сетевой конфиг ---
     local CI_CONTENT="network: {config: disabled}"
     if [[ -d /etc/cloud/cloud.cfg.d ]]; then
         if [[ -f "$CLOUD_INIT_NET_DISABLE" && "$(cat "$CLOUD_INIT_NET_DISABLE")" == "$CI_CONTENT" ]]; then
@@ -1350,8 +1337,6 @@ PY
             printf '%s\n' "$CI_CONTENT" > "$CLOUD_INIT_NET_DISABLE"
         fi
     fi
-    
-    # --- 4. /etc/resolv.conf -> resolv.conf с реальными upstream-серверами ---
     if [[ -L /etc/resolv.conf && "$(readlink /etc/resolv.conf)" == "$RESOLV_TARGET" ]]; then
         skip "/etc/resolv.conf уже указывает на $RESOLV_TARGET"
     else
@@ -1360,8 +1345,6 @@ PY
         ln -sfn "$RESOLV_TARGET" /etc/resolv.conf
         RESOLVED_CHANGED=1
     fi
-    
-    # --- 5. Применение (только при изменениях) ---
     if [[ $NETPLAN_CHANGED -eq 1 ]]; then
         log "netplan generate"
         if ! netplan generate; then
@@ -1374,7 +1357,6 @@ PY
         netplan apply
         RESOLVED_CHANGED=1
     fi
-    
     if [[ $RESOLVED_CHANGED -eq 1 ]]; then
         log "Перезапуск systemd-resolved"
         systemctl enable systemd-resolved >/dev/null 2>&1 || true
@@ -1383,8 +1365,6 @@ PY
     else
         skip "Применение не требуется"
     fi
-    
-    # --- 6. Проверка ---
     echo ""
     echo "${c_txt}===== netplan: nameservers =====${c_off}"
     grep -A8 'nameservers:' "$NETPLAN_FILE" || true
@@ -1400,7 +1380,6 @@ PY
     echo ""
     echo "${c_txt}===== Тест резолва =====${c_off}"
     resolvectl query debian.org || true
-    
     [[ $BACKUP_DONE -eq 1 ]] && log "Бэкап: $BACKUP_DIR" || true
 }
 
@@ -1483,7 +1462,7 @@ root_mail_setup() {
     local host port user pass rcpt
     host=$(ask "SMTP-хост" "smtp.yandex.ru")
     port=$(ask "Порт" "465")
-    user=$(ask "Логин")
+    user=$(ask "Ло��ин")
     read -rsp "Пароль: " pass; echo
     rcpt=$(ask "Ящик получателя" "$user")
     local starttls="off"; [[ "$port" == "587" ]] && starttls="on"
