@@ -17,7 +17,7 @@ reload_nginx() {
             && log "nginx перечитал конфигурацию." \
             || warn "reload не прошёл — проверьте конфиг: journalctl -u nginx"
     else
-        warn "nginx не запущен — сначала установите (пункт 1 в подменю)."
+        warn "nginx не запущен — сначала установите (пункт 2 в подменю)."
     fi
 }
 
@@ -204,8 +204,8 @@ front_nginx_menu() {
         cat <<SUM
 
 ${c_mag} --- nginx и сертификаты: $st ---${c_off}
-  ${c_num}1.${c_off} ${c_txt}Установить nginx на хост${c_off}
-  ${c_num}2.${c_off} ${c_txt}Сертификаты — делать ПОСЛЕ установки nginx${c_off}
+  ${c_num}1.${c_off} ${c_txt}Сертификаты — делать ПЕРВЫМ${c_off}
+  ${c_num}2.${c_off} ${c_txt}Установить nginx на хост${c_off}
   ${c_num}3.${c_off} ${c_txt}Перезапустить nginx${c_off}
   ${c_num}4.${c_off} ${c_txt}Stream-passthrough домены: ${STREAM_DOMAINS:-нет}${c_off}
   ${c_num}5.${c_off} ${c_txt}Показать полный текущий конфиг${c_off}
@@ -217,11 +217,11 @@ ${c_mag} --- nginx и сертификаты: $st ---${c_off}
 SUM
         read -rp "Выбор: " c || true
         case "$c" in
-            1) install_nginx_host ;;
-            2) certs_menu ;;
+            1) certs_menu ;;
+            2) install_nginx_host ;;
             3)
                 if ! command -v nginx >/dev/null 2>&1; then
-                    warn "nginx не установлен — сначала пункт 1."
+                    warn "nginx не установлен — сначала пункт 2."
                     read -rp "Enter — продолжить " _ || true
                     continue
                 fi
@@ -230,7 +230,7 @@ SUM
                     warn "часть портов занята (см. выше) — продолжаем."
                 fi
                 [[ -f "$NGINX_CONFIG_DIR/certs/fullchain.pem" ]] \
-                    || warn "сертификаты не найдены — сначала пункт 2."
+                    || warn "сертификаты не найдены — сначала пункт 1."
                 systemctl restart nginx
                 sleep 1
                 if systemctl is-active --quiet nginx; then
@@ -380,7 +380,7 @@ certs_menu() {
                 || warn "Не удалось перезагрузить nginx"
         else
             echo "${c_txt}ℹ nginx ещё не запущен${c_off}"
-            echo "${c_txt}  После запуска nginx (пункт 3) сертификаты будут использованы автоматически.${c_off}"
+            echo "${c_txt}  После установки nginx (пункт 2) сертификаты будут использованы автоматически.${c_off}"
             echo "${c_txt}  Продление сертификатов: acme.sh cron (автоматически)${c_off}"
         fi
     else
