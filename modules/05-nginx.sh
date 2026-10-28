@@ -7,7 +7,11 @@ hsts_line_enable() {
     [[ -f "$NGINX_CONF" ]] || return 0
     sed -i '/Strict-Transport-Security/d' "$NGINX_CONF"
     if [[ "${HSTS_ENABLED:-false}" == "true" ]]; then
-        sed -i 's|^    add_header Referrer-Policy strict-origin-when-cross-origin always;$|&\n    add_header Strict-Transport-Security "max-age=31536000" always;|' "$NGINX_CONF"
+        if grep -q '^    add_header Referrer-Policy strict-origin-when-cross-origin always;$' "$NGINX_CONF"; then
+            sed -i 's|^    add_header Referrer-Policy strict-origin-when-cross-origin always;$|&\n    add_header Strict-Transport-Security "max-age=31536000" always;|' "$NGINX_CONF"
+        else
+            warn "HSTS не добавлен: строка Referrer-Policy не найдена в $NGINX_CONF"
+        fi
     fi
 }
 
@@ -199,7 +203,7 @@ auth_conf() {
 
 dns_hint() {
     if ! getent ahosts "$1" >/dev/null 2>&1; then
-        warn "$1 не резолвится — сертификат не выпустится/не пройдёт проверка, пока нет A-записи на ваш IP."
+        warn "$1 не резолвится — сертификат не выпустится/не пройдёт проверку, пока нет A-записи на ваш IP."
     fi
 }
 
@@ -249,6 +253,48 @@ watch_nginx_logs() {
     fi
 }
 
+# Сопоставление кода провайдера acme.sh с именами переменных окружения.
+# Возвращает список пар "VAR=значение" в stdout.
+acme_creds() {
+    local prov="$1" key1="$2" key2="$3"
+    case "$prov" in
+        dns_cf)        printf 'CF_Token=%s\n' "$key1"; [[ -n "$key2" ]] && printf 'CF_Account_ID=%s\n' "$key2" ;;
+        dns_hetzner)   printf 'HETZNER_Token=%s\n' "$key1" ;;
+        dns_desec)     printf 'DESECRETE=%s\n' "$key1" ;;
+        dns_selectel)  printf 'SELECTEL_API_TOKEN=%s\n' "$key1" ;;
+        dns_regru)     printf 'REGRU_API_USERNAME=%s\nREGRU_API_PASSWORD=%s\n' "$key1" "$key2" ;;
+        dns_yandex)    printf 'YANDEX_TOKEN=%s\n' "$key1" ;;
+        *)
+            # Неизвестный провайдер: спрашиваем имена переменных у пользователя
+            local v1 v2
+            v1="$(ask "Имя переменной окружения для первого ключа (см. dnsapi wiki)")"
+            [[ -n "$v1" ]] && printf '%s=%s\n' "$v1" "$key1"
+            if [[ -n "$key2" ]]; then
+                v2="$(ask "Имя переменной окружения для второго ключа")"
+                [[ -n "$v2" ]] && printf '%s=%s\n' "$v2" "$key2"
+            fi ;;
+    esac
+}
+
+# Экспортирует креды в текущую сессию и сохраняет в account.conf
+# (acme.sh подгружает account.conf при продлении по cron).
+apply_acme_creds() {
+    local creds="$1" pair var val
+    while IFS= read -r pair; do
+        [[ -z "$pair" ]] && continue
+        var="${pair%%=*}"; val="${pair#*=}"
+        export "$var=$val"
+        if [[ -f "$HOME/.acme.sh/account.conf" ]]; then
+            # Обновляем существующую запись или добавляем новую
+            if grep -q "^export ${var}=" "$HOME/.acme.sh/account.conf"; then
+                sed -i "s|^export ${var}=.*|export ${var}='${val}'|" "$HOME/.acme.sh/account.conf"
+            else
+                printf "export %s='%s'\n" "$var" "$val" >> "$HOME/.acme.sh/account.conf"
+            fi
+        fi
+    done <<< "$creds"
+}
+
 front_nginx_menu() {
     while true; do
         local st; st=$(systemctl is-active nginx 2>/dev/null || echo "не установлен")
@@ -271,7 +317,8 @@ ${c_mag} --- nginx и сертификаты: $st ---${c_off}
 
   ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
-        read -rp "Выбор: " c || true
+        read -rp "Выбор: " c || return 0
+        [[ -z "$c" ]] && continue
         case "$c" in
             1) certs_menu ;;
             2) install_nginx_host ;;
@@ -314,11 +361,10 @@ SUM
                 lst="$entry_clean"; update_env STREAM_DOMAINS "$lst"
                 {
                     echo "map \$ssl_preread_server_name \$stream_upstream {"
-                    local entry d p
+                    local entry d p seen_ports=""
                     IFS=','; for entry in $lst; do
                         [[ -z "$entry" ]] && continue
                         d="${entry%%:*}"; p="${entry##*:}"
-                        [[ "$p" == "$d" ]] && p="8444"
                         printf '    %-40s host_passthrough_%s;\n' "$d" "$p"
                     done; unset IFS
                     echo "    default web_tls;"
@@ -326,7 +372,10 @@ SUM
                     echo "upstream web_tls { server 127.0.0.1:8443; }"
                     IFS=','; for entry in $lst; do
                         [[ -z "$entry" ]] && continue
-                        p="${entry##*:}"; [[ "$p" == "$entry" ]] && p="8444"
+                        p="${entry##*:}"
+                        # Дедупликация upstream'ов по порту
+                        [[ ":$seen_ports:" == *":$p:"* ]] && continue
+                        seen_ports+="${seen_ports:+:}$p"
                         printf 'upstream host_passthrough_%s { server 127.0.0.1:%s; }\n' "$p" "$p"
                     done; unset IFS
                 } > "$NGINX_CONFIG_DIR/stream.d/00-map.conf"
@@ -408,7 +457,13 @@ certs_menu() {
     update_env ACME_DNS_PROVIDER "$prov"
     mkdir -p "$NGINX_CONFIG_DIR/certs"
 
-    export CF_Token="$key1" CF_Account_ID="$key2"
+    # Экспортируем креды под именами переменных провайдера и сохраняем
+    # в account.conf, чтобы продление по cron работало без интерактива.
+    local creds; creds="$(acme_creds "$prov" "$key1" "$key2")"
+    [[ -n "$creds" ]] || die "креды провайдера $prov не заданы"
+    apply_acme_creds "$creds"
+
+    dns_hint "$DOMAIN"
 
     local cert_dir="$NGINX_CONFIG_DIR/certs"
     local cert_exists=false
