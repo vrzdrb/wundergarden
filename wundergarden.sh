@@ -39,7 +39,7 @@ banner() {
         printf '%s  W U N D E R G A R D E N%s\n' "$c_mag" "$c_off"
         return 0
     fi
-    cat <<'BAN'
+    cat <<BAN
 ${c_mag}                                                                          
                        ▄▄                                  ▄▄             
                        ██                                  ██             
