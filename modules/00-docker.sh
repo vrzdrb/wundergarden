@@ -194,7 +194,7 @@ services:
     networks: [net-cal]
 
   sftpgo:
-    image: drakkan/sftpgo:latest-alpine
+    image: drakkan/sftpgo:alpine
     restart: unless-stopped
     <<: *harden
     logging: *log
@@ -206,10 +206,13 @@ services:
       - SFTPGO_DATA_PROVIDER__DSN=sftpgo:${SFTPGO_DB_PASSWORD}@tcp(sftpgo-db:3306)/sftpgo?timeout=5s
       - SFTPGO_DATA_PROVIDER__USERS_BASE_DIR=/var/lib/sftpgo
       - SFTPGO_WEBDAVD__BINDINGS__0__PORT=8090
+      - 'SFTPGO_HTTPD__BINDINGS__0__SECURITY__HTTPS_PROXY_HEADERS=[{"name":"X-Forwarded-Proto","value":"https"}]'
+      - SFTPGO_HTTPD__BINDINGS__0__PROXY_ALLOWED=127.0.0.1/32,172.16.0.0/12
     volumes:
       - ${SFTPGO_DATA}:/var/lib/sftpgo
     ports:
       - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8090:8090"
       - ${SFTPGO_SFTP_BIND:-127.0.0.1:2022}:2022
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz >/dev/null 2>&1 || curl -fsS http://localhost:8080/healthz >/dev/null 2>&1 || exit 1"]
@@ -349,6 +352,8 @@ services:
     image: mariadb:11
     restart: unless-stopped
     <<: *harden
+    # mariadb entrypoint требует chown/setuid (gosu) — без этих caps не стартует
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     logging: *log
     environment:
       - MYSQL_ROOT_PASSWORD=${SFTPGO_DB_ROOT_PASSWORD}
@@ -377,6 +382,7 @@ services:
     image: mariadb:11
     restart: unless-stopped
     <<: *harden
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     logging: *log
     environment:
       - MYSQL_ROOT_PASSWORD=${ETHERPAD_DB_ROOT_PASSWORD}
@@ -532,6 +538,7 @@ services:
     image: ${LIMESURVEY_DB_IMAGE:-mariadb:11}
     restart: unless-stopped
     <<: *harden
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     logging: *log
     environment:
       - MYSQL_ROOT_PASSWORD=${LIMESURVEY_DB_ROOT_PASSWORD}
@@ -730,7 +737,7 @@ SFTPGO_DB_PASSWORD=$(gen_pass)
 SFTPGO_DB_ROOT_PASSWORD=$(gen_pass)
 SFTPGO_ADMIN_USER=admin
 SFTPGO_SFTP_BIND=127.0.0.1:2022
-SFTPGO_DATA=/mnt/emmc/cloud
+SFTPGO_DATA=/opt/homeserver/sftpgo
 SYNCTHING_GUI_AUTH=admin:$(gen_pass)
 SYNCTHING_GUI_BIND=127.0.0.1:8384
 SYNCTHING_SYNC_DIR=$CONFIG_ROOT/data/syncthing/sync
@@ -883,5 +890,34 @@ wait_container() {
 
     warn "Контейнер $container не готов после $max_attempts попыток"
     return 1
+}
+
+# Просмотр логов контейнеров сервиса.
+# Использование: logs_menu <сервис1> [сервис2 ...]
+# Пример: logs_menu sftpgo sftpgo-db
+logs_menu() {
+    local services=("$@")
+    [[ ${#services[@]} -eq 0 ]] && { warn "logs_menu: не переданы сервисы"; return 1; }
+    while true; do
+        clear
+        echo "${c_mag} --- Логи ---${c_off}"
+        local i
+        for i in "${!services[@]}"; do
+            printf '  %s%d.%s %s\n' "${c_num}" "$((i+1))" "${c_off}" "${services[$i]}"
+        done
+        echo "  0. Назад"
+        local c
+        read -rp "Чьи логи смотрим: " c || return 0
+        [[ -z "$c" ]] && continue
+        case "$c" in
+            0) return 0 ;;
+            *[!0-9]*) warn "нужен номер пункта"; continue ;;
+        esac
+        if (( c >= 1 && c <= ${#services[@]} )); then
+            docker compose -f "$COMPOSE_FILE" logs -f --tail 100 "${services[$((c-1))]}" || true
+        else
+            warn "нет такого пункта"
+        fi
+    done
 }
 

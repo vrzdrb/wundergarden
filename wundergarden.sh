@@ -64,7 +64,7 @@ _t() {
             M06) echo "Jitsi Meet" ;;
             M07) echo "CouchDB" ;;
             M08) echo "Radicale" ;;
-            M09) echo "SFTPGo" ;;
+            M09) echo "SFTPGo" ;
             M10) echo "Syncthing" ;;
             M11) echo "Matrix" ;;
             M12) echo "Luanti" ;;
@@ -149,7 +149,7 @@ lang_menu() {
 
 onoff() { [[ "$1" == "true" ]] && echo "вкл" || echo "выкл"; }
 load_env() { set -a; source "$ENV_FILE"; set +a; }
-has_forbidden() { printf '%s' "$1" | grep -q "[\"'|/\$\\& ]"; }
+has_forbidden() { printf '%s' "$1" | grep -q "[\"'|\$\\& ]"; }
 update_env() {
     if has_forbidden "$2"; then
         die "update_env: небезопасное значение для $1"
@@ -1627,15 +1627,48 @@ docker_menu() {
             1) prep_system; read -rp "Enter — продолжить " _ || true ;;
             2)
                 if ! docker compose version >/dev/null 2>&1; then warn "Docker не установлен"; continue; fi
-                local container; container=$(ask "Имя контейнера" "")
-                [[ -z "$container" ]] && continue
-                docker restart "$container" && log "Контейнер $container перезапущен"
+                local containers=()
+                mapfile -t containers < <(docker ps -a --format '{{.Names}}')
+                if ((${#containers[@]} == 0)); then warn "контейнеров нет"; read -rp "Enter — продолжить " _ || true; continue; fi
+                local i st
+                for i in "${!containers[@]}"; do
+                    st=$(docker inspect -f '{{.State.Status}}' "${containers[$i]}" 2>/dev/null)
+                    printf '  %s%2d. %-32s %s%s\n' "${c_txt}" "$((i+1))" "${containers[$i]}" "$st" "${c_off}"
+                done
+                read -rp "Номер контейнера: " n || true
+                if [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= ${#containers[@]} )); then
+                    docker restart "${containers[$((n-1))]}" \
+                        && log "Контейнер ${containers[$((n-1))]} перезапущен" \
+                        || warn "не удалось перезапустить"
+                else
+                    warn "нет такого контейнера"
+                fi
                 read -rp "Enter — продолжить " _ || true ;;
             3)
                 if ! docker compose version >/dev/null 2>&1; then warn "Docker не установлен"; continue; fi
-                local container; container=$(ask "Имя контейнера" "")
-                [[ -z "$container" ]] && continue
-                docker compose up -d --force-recreate "$container" && log "Контейнер $container пересоздан"
+                local containers=()
+                mapfile -t containers < <(docker ps -a --format '{{.Names}}')
+                if ((${#containers[@]} == 0)); then warn "контейнеров нет"; read -rp "Enter — продолжить " _ || true; continue; fi
+                local i st
+                for i in "${!containers[@]}"; do
+                    st=$(docker inspect -f '{{.State.Status}}' "${containers[$i]}" 2>/dev/null)
+                    printf '  %s%2d. %-32s %s%s\n' "${c_txt}" "$((i+1))" "${containers[$i]}" "$st" "${c_off}"
+                done
+                read -rp "Номер контейнера: " n || true
+                if [[ "$n" =~ ^[0-9]+$ ]] && (( n >= 1 && n <= ${#containers[@]} )); then
+                    local name svc
+                    name="${containers[$((n-1))]}"
+                    svc=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$name" 2>/dev/null)
+                    if [[ -n "$svc" ]]; then
+                        docker compose up -d --force-recreate "$svc" \
+                            && log "Контейнер $name пересоздан" \
+                            || warn "не удалось пересоздать $name"
+                    else
+                        warn "контейнер $name не из compose-проекта homeserver"
+                    fi
+                else
+                    warn "нет такого контейнера"
+                fi
                 read -rp "Enter — продолжить " _ || true ;;
             4)
                 journalctl -u docker --no-pager -n 50
