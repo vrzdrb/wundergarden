@@ -40,6 +40,7 @@ ${c_mag} --- Настройки SFTPGo ---${c_off}   Статус: $st
   ${c_num}6.${c_off} ${c_txt}WebDAV через nginx: $webdav_descr${c_off}
   ${c_num}7.${c_off} ${c_txt}Терминация TLS: $tls_descr${c_off}
   ${c_num}8.${c_off} ${c_txt}Логи${c_off}
+
   ${c_num}9.${c_off} ${c_txt}Установить / Применить${c_off}
   ${c_num}0.${c_off} ${c_txt}Назад (без установки)${c_off}
 
@@ -166,7 +167,6 @@ SUM
         # nginx сам терминирует TLS (loopback-only), в sftpgo — plain HTTP.
         add_site 30-sftpgo "server {
     listen 127.0.0.1:8443 ssl;
-    listen [::1]:8443 ssl;
     server_name $SUB_FILES;
     ssl_certificate     $CONFIG_ROOT/config/nginx/certs/fullchain.pem;
     ssl_certificate_key $CONFIG_ROOT/config/nginx/certs/privkey.pem;
@@ -182,7 +182,6 @@ SUM
         # сюда; мы вкладываем X-Forwarded-Proto: https и прячем админку.
         add_site 30-sftpgo "server {
     listen 127.0.0.1:8081;
-    listen [::1]:8081;
     server_name $SUB_FILES;
     client_max_body_size 0;
     location /web/admin { return 403; }
@@ -200,7 +199,6 @@ SUM
     if [[ "$webdav" == "true" ]]; then
         add_site 35-webdav "server {
     listen 127.0.0.1:8443 ssl;
-    listen [::1]:8443 ssl;
     server_name $SUB_WEBDAV;
     ssl_certificate     $CONFIG_ROOT/config/nginx/certs/fullchain.pem;
     ssl_certificate_key $CONFIG_ROOT/config/nginx/certs/privkey.pem;

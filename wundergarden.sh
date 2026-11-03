@@ -64,7 +64,7 @@ _t() {
             M06) echo "Jitsi Meet" ;;
             M07) echo "CouchDB" ;;
             M08) echo "Radicale" ;;
-            M09) echo "SFTPGo" ;
+            M09) echo "SFTPGo" ;;
             M10) echo "Syncthing" ;;
             M11) echo "Matrix" ;;
             M12) echo "Luanti" ;;
@@ -149,7 +149,7 @@ lang_menu() {
 
 onoff() { [[ "$1" == "true" ]] && echo "вкл" || echo "выкл"; }
 load_env() { set -a; source "$ENV_FILE"; set +a; }
-has_forbidden() { printf '%s' "$1" | grep -q "[\"'|\$\\& ]"; }
+has_forbidden() { printf '%s' "$1" | grep -q "[\"'|\$\\&]"; }
 update_env() {
     if has_forbidden "$2"; then
         die "update_env: небезопасное значение для $1"
@@ -733,7 +733,7 @@ abuse_block_setup() {
 #!/usr/bin/env bash
 set -euo pipefail
 URL='${url}'
-TMP=" $(mktemp)"
+TMP="$(mktemp)"
 trap 'rm -f "\$TMP"' EXIT
 
 get_default_external_iface() {

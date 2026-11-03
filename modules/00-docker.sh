@@ -149,7 +149,7 @@ x-log: &log
     max-file: "2"
 
 x-harden: &harden
-  cap_drop: [ALL]
+  cap_drop: [NET_RAW, SYS_PTRACE, SYS_ADMIN, SYS_MODULE, DAC_READ_SEARCH]
   security_opt: [no-new-privileges:true]
   pids_limit: 400
 
@@ -194,7 +194,7 @@ services:
     networks: [net-cal]
 
   sftpgo:
-    image: drakkan/sftpgo:alpine
+    image: drakkan/sftpgo:latest-alpine
     restart: unless-stopped
     <<: *harden
     logging: *log
@@ -203,7 +203,11 @@ services:
       - SFTPGO_DEFAULT_ADMIN_PASSWORD=${SFTPGO_ADMIN_PASSWORD}
       - SFTPGO_HTTPD__BINDINGS__0__PORT=8080
       - SFTPGO_DATA_PROVIDER__DRIVER=mysql
-      - SFTPGO_DATA_PROVIDER__DSN=sftpgo:${SFTPGO_DB_PASSWORD}@tcp(sftpgo-db:3306)/sftpgo?timeout=5s
+      - SFTPGO_DATA_PROVIDER__NAME=sftpgo
+      - SFTPGO_DATA_PROVIDER__HOST=sftpgo-db
+      - SFTPGO_DATA_PROVIDER__PORT=3306
+      - SFTPGO_DATA_PROVIDER__USERNAME=sftpgo
+      - SFTPGO_DATA_PROVIDER__PASSWORD=${SFTPGO_DB_PASSWORD}
       - SFTPGO_DATA_PROVIDER__USERS_BASE_DIR=/var/lib/sftpgo
       - SFTPGO_WEBDAVD__BINDINGS__0__PORT=8090
       - 'SFTPGO_HTTPD__BINDINGS__0__SECURITY__HTTPS_PROXY_HEADERS=[{"name":"X-Forwarded-Proto","value":"https"}]'
@@ -352,8 +356,6 @@ services:
     image: mariadb:11
     restart: unless-stopped
     <<: *harden
-    # mariadb entrypoint требует chown/setuid (gosu) — без этих caps не стартует
-    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     logging: *log
     environment:
       - MYSQL_ROOT_PASSWORD=${SFTPGO_DB_ROOT_PASSWORD}
@@ -382,7 +384,6 @@ services:
     image: mariadb:11
     restart: unless-stopped
     <<: *harden
-    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     logging: *log
     environment:
       - MYSQL_ROOT_PASSWORD=${ETHERPAD_DB_ROOT_PASSWORD}
@@ -411,8 +412,8 @@ services:
       - MUMBLE_CONFIG_sslCert=/cert/fullchain.pem
       - MUMBLE_CONFIG_sslKey=/cert/privkey.pem
     volumes:
-      - ./data/mumble:/data
-      - ${CONFIG_ROOT:-.}/config/nginx/certs:/cert:ro
+      - ${CONFIG_ROOT:-.}/data/mumble:/data
+      - ${CONFIG_ROOT:-.}/config/mumble:/cert:ro
     ports:
       - "64738:64738/tcp"
       - "64738:64738/udp"
@@ -538,7 +539,6 @@ services:
     image: ${LIMESURVEY_DB_IMAGE:-mariadb:11}
     restart: unless-stopped
     <<: *harden
-    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     logging: *log
     environment:
       - MYSQL_ROOT_PASSWORD=${LIMESURVEY_DB_ROOT_PASSWORD}
