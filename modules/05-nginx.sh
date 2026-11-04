@@ -95,13 +95,11 @@ http {
 
     server {
         listen 80 default_server;
-        listen [::]:80 default_server;
         return 301 https://\$host\$request_uri;
     }
 
     server {
-        listen 127.0.0.1:8443 ssl default_server;
-        listen [::1]:8443 ssl default_server;
+        listen 127.0.0.1:8443 ssl;
         ssl_certificate     $NGINX_CONFIG_DIR/certs/fullchain.pem;
         ssl_certificate_key $NGINX_CONFIG_DIR/certs/privkey.pem;
         return 444;
@@ -116,19 +114,12 @@ stream {
 
     server {
         listen 443;
-        listen [::]:443;
         proxy_pass \$stream_upstream;
         ssl_preread on;
     }
 }
 NGXEOF
 
-    # IPv6 может быть отключён на хосте — тогда listen на [::] приведёт
-    # к ошибке bind() и nginx -t не пройдёт. Убираем IPv6-строки.
-    if [[ ! -f /proc/net/if_inet6 ]]; then
-        sed -i '/listen \[::/d' "$NGINX_CONF"
-        log "IPv6 не обнаружен — IPv6-директивы listen удалены из конфига"
-    fi
 
     # Создаём базовые include-файлы
     cat > "$NGINX_CONFIG_DIR/proxy_common.conf" <<'NGXEOF'

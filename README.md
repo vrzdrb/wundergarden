@@ -1,5 +1,7 @@
 # Wundergarden
 
+![Preview](assets/preview.png)
+
 Модульный установщик домашнего/VPS-сервера: nginx + acme.sh + Docker-контейнеры: Obsidian LiveSync (CouchDB), Radicale (CalDAV), SFTPGo, Syncthing,
 Matrix (continuwuity + coturn), Luanti, SearXNG, Excalidraw, Etherpad, Mumble, ClassQuiz,
 LimeSurvey, Netdata, Gitea, Jitsi Meet.
