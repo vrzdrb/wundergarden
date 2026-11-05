@@ -147,6 +147,8 @@ install_jitsi() {
     jitsi_set_env ENABLE_XMPP_WEBSOCKET 1
     jitsi_set_env ENABLE_HTTP_REDIRECT 0
     jitsi_set_env JITSI_IMAGE_VERSION "$tag"
+    jitsi_set_env VIDEOBRIDGE_MAX_MEMORY "1024m"
+    jitsi_set_env JICOFO_MAX_MEMORY "1024m"
     jitsi_set_env ENABLE_LETSENCRYPT 0
     jitsi_set_env JITSI_MODE "$mode"
     jitsi_set_env JITSI_PORT "$jitsi_port"
@@ -382,6 +384,8 @@ jitsi_enable_jwt() {
     jitsi_set_env JWT_APP_ID "$app_id"
     jitsi_set_env JWT_APP_SECRET "$secret"
     jitsi_set_env ENABLE_GUESTS 1
+    jitsi_token_server_stop 2>/dev/null || true
+    rm -f "$JITSI_TOKEN_DIR/run.sh"
     jitsi_dc up -d --force-recreate
     log "JWT включён. APP_ID=$app_id | APP_SECRET=$secret (сохраните)"
     log "Выдача токенов: см. исходный jitsi-auto.sh (Flask-сервер) — добавлю по запросу."
@@ -413,6 +417,7 @@ jitsi_token_server_start() {
         python3 -m venv "$JITSI_TOKEN_DIR/venv"
         "$JITSI_TOKEN_DIR/venv/bin/pip" -q install flask "pyjwt>=2" || die "pip install не удался"
     fi
+    rm -f "$JITSI_TOKEN_DIR/run.sh"
     cat > "$JITSI_TOKEN_DIR/server.py" <<'EOF'
 import os, hmac, time, jwt
 from flask import Flask, request, jsonify, abort
