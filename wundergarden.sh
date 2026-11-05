@@ -40,13 +40,13 @@ banner() {
         return 0
     fi
     cat <<BAN
-${c_mag}                                                                          
-                       ▄▄                                  ▄▄             
-                       ██                                  ██             
-██   ██ ██ ██ ████▄ ▄████ ▄█▀█▄ ████▄ ▄████  ▀▀█▄ ████▄ ▄████ ▄█▀█▄ ████▄ 
-██ █ ██ ██ ██ ██ ██ ██ ██ ██▄█▀ ██ ▀▀ ██ ██ ▄█▀██ ██ ▀▀ ██ ██ ██▄█▀ ██ ██ 
- ██▀██  ▀██▀█ ██ ██ ▀████ ▀█▄▄▄ ██    ▀████ ▀█▄██ ██    ▀████ ▀█▄▄▄ ██ ██ 
-                                         ██                               
+${c_mag}
+                       ▄▄                                  ▄▄
+                       ██                                  ██
+██   ██ ██ ██ ████▄ ▄████ ▄█▀█▄ ████▄ ▄████  ▀▀█▄ ████▄ ▄████ ▄█▀█▄ ████▄
+██ █ ██ ██ ██ ██ ██ ██ ██ ██▄█▀ ██ ▀▀ ██ ██ ▄█▀██ ██ ▀▀ ██ ██ ██▄█▀ ██ ██
+ ██▀██  ▀██▀█ ██ ██ ▀████ ▀█▄▄▄ ██    ▀████ ▀█▄██ ██    ▀████ ▀█▄▄▄ ██ ██
+                                         ██
                                        ▀▀▀${c_off}
 BAN
 }
@@ -583,7 +583,7 @@ ssh_settings_menu() {
                         echo "  ${c_txt}⚠ Неправильные права на .ssh: $ssh_perms (должно быть 700)${c_off}"
                         chmod 700 "$user_home/.ssh"
                         echo "  ${c_txt}✓ Исправлено на 700${c_off}"
-                        ((fixed_count++))
+                        fixed_count=$((fixed_count + 1))
                     else
                         echo "  ${c_txt}✓ Права на .ssh корректны (700)${c_off}"
                     fi
@@ -593,7 +593,7 @@ ssh_settings_menu() {
                         echo "  ${c_txt}⚠ Неправильный владелец .ssh: $ssh_owner (должно быть $username:$username)${c_off}"
                         chown -R "$username:$username" "$user_home/.ssh"
                         echo "  ${c_txt}✓ Владелец исправлен${c_off}"
-                        ((fixed_count++))
+                        fixed_count=$((fixed_count + 1))
                     else
                         echo "  ${c_txt}✓ Владелец .ssh корректен${c_off}"
                     fi
@@ -604,7 +604,7 @@ ssh_settings_menu() {
                             echo "  ${c_txt}⚠ Неправильные права на authorized_keys: $key_perms (должно быть 600)${c_off}"
                             chmod 600 "$user_home/.ssh/authorized_keys"
                             echo "  ${c_txt}✓ Исправлено на 600${c_off}"
-                            ((fixed_count++))
+                            fixed_count=$((fixed_count + 1))
                         else
                             echo "  ${c_txt}✓ Права на authorized_keys корректны (600)${c_off}"
                         fi
@@ -614,7 +614,7 @@ ssh_settings_menu() {
                             echo "  ${c_txt}⚠ Неправильный владелец authorized_keys: $key_owner${c_off}"
                             chown "$username:$username" "$user_home/.ssh/authorized_keys"
                             echo "  ${c_txt}✓ Владелец исправлен${c_off}"
-                            ((fixed_count++))
+                            fixed_count=$((fixed_count + 1))
                         else
                             echo "  ${c_txt}✓ Владелец authorized_keys корректен${c_off}"
                         fi

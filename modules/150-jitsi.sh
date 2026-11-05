@@ -530,7 +530,6 @@ jitsi_menu() {
             fi
         fi
         cat <<SUM
-
 ${c_mag} --- Jitsi Meet ${st}${svc_st}${turn_st} ---${c_off}
   ${c_num}1.${c_off} ${c_txt}Установка / переустановка${c_off}
   ${c_num}2.${c_off} ${c_txt}Включить JWT-аутентификацию${c_off}
@@ -540,8 +539,7 @@ ${c_mag} --- Jitsi Meet ${st}${svc_st}${turn_st} ---${c_off}
   ${c_num}6.${c_off} ${c_txt}Отозвать все токены${c_off}
   ${c_num}7.${c_off} ${c_txt}Остановить token-сервер${c_off}
   ${c_num}8.${c_off} ${c_txt}Логи${c_off}
-
-  ${c_num}r.${c_off} ${c_txt}Удалить${c_off}
+  ${c_num}9.${c_off} ${c_txt}Удалить${c_off}
   ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
@@ -561,7 +559,7 @@ SUM
                 fi
                 read -rp "Enter — продолжить " _ || true
                 ;;
-            r|R) remove_jitsi ;;
+            9) remove_jitsi ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
         esac

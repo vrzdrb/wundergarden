@@ -149,8 +149,6 @@ x-log: &log
     max-file: "2"
 
 x-harden: &harden
-  cap_drop: [NET_RAW, SYS_PTRACE, SYS_ADMIN, SYS_MODULE, DAC_READ_SEARCH]
-  security_opt: [no-new-privileges:true]
   pids_limit: 400
 
 services:
@@ -164,7 +162,7 @@ services:
       - COUCHDB_PASSWORD=${COUCHDB_PASSWORD}
     volumes:
       - ./data/couchdb:/opt/couchdb/data
-      - ./config/couchdb/10-livesync.ini:/opt/couchdb/etc/local.d/10-livesync.ini:ro
+      - ./config/couchdb/10-livesync.ini:/opt/couchdb/etc/local.d/10-livesync.ini
     ports:
       - "127.0.0.1:5984:5984"
     networks: [net-couchdb]
@@ -885,7 +883,7 @@ wait_container() {
         fi
 
         sleep 2
-        ((attempt++))
+        attempt=$((attempt + 1))
     done
 
     warn "Контейнер $container не готов после $max_attempts попыток"
@@ -920,4 +918,3 @@ logs_menu() {
         fi
     done
 }
-

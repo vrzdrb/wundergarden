@@ -3,6 +3,15 @@
 COUCHDB_DATA="$DATA_DIR/couchdb"
 COUCHDB_CFG="$CONFIG_ROOT/config/couchdb"
 
+# fallback если скрипт запущен не через wundergarden.sh
+command -v rm_site >/dev/null 2>&1 || rm_site() {
+    rm -f "$CONFIG_ROOT/config/nginx/conf.d/${1}.conf"
+    nginx -s reload 2>/dev/null || true
+}
+command -v reload_nginx >/dev/null 2>&1 || reload_nginx() {
+    nginx -s reload 2>/dev/null || true
+}
+
 couchdb_running() {
     docker ps --format '{{.Names}}' 2>/dev/null | grep -qE 'couchdb'
 }
@@ -15,7 +24,7 @@ install_couchdb() {
     local fresh="true" new_pass=""
     if [[ -d "$COUCHDB_DATA" && -n "$(ls -A "$COUCHDB_DATA" 2>/dev/null)" ]]; then fresh="false"; fi
 
-    local dbname="obsidian" maxdoc=50 maxreq=4096 cors_extra="" port="5984"
+    local dbname="obsidian" maxdoc=50 maxreq=4096 cors_extra=""
     local subdomain="${SUB_OBSIDIAN:-obsidian}"
     [[ "$subdomain" == *.* ]] || subdomain="${subdomain}.${DOMAIN}"
 
@@ -24,16 +33,14 @@ install_couchdb() {
         [[ "$fresh" == "true" ]] && pass_descr="будет сгенерирован (или задайте в пункте 2)"
         clear
         cat <<SUM
-
 ${c_mag} --- Настройки CouchDB ---${c_off}
   ${c_num}1.${c_off} ${c_txt}Поддомен: ${subdomain}${c_off}
   ${c_num}2.${c_off} ${c_txt}Настройки учётной записи (логин: $COUCHDB_USER)${c_off}
-  ${c_num}3.${c_off} ${c_txt}Локальный порт: ${port}${c_off}
-  ${c_num}4.${c_off} ${c_txt}База заметок: $dbname${c_off}
-  ${c_num}5.${c_off} ${c_txt}Лимиты: документ ${maxdoc} МБ | HTTP-запрос ${maxreq} МБ${c_off}
-  ${c_num}6.${c_off} ${c_txt}Доп. CORS-origins: ${cors_extra:-—}${c_off}
-
-  ${c_num}9.${c_off} ${c_txt}Установить / Применить${c_off}
+  ${c_num}3.${c_off} ${c_txt}База заметок: $dbname${c_off}
+  ${c_num}4.${c_off} ${c_txt}Лимиты: документ ${maxdoc} МБ | HTTP-запрос ${maxreq} МБ${c_off}
+  ${c_num}5.${c_off} ${c_txt}Доп. CORS-origins: ${cors_extra:-—}${c_off}
+  ${c_num}6.${c_off} ${c_txt}Установить / Применить${c_off}
+  ${c_num}7.${c_off} ${c_txt}Удалить${c_off}
   ${c_num}0.${c_off} ${c_txt}Назад (без установки)${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
@@ -57,26 +64,22 @@ SUM
                 [[ -n "$p" ]] && new_pass="$p"
                 ;;
             3)
-                local p
-                p="$(ask "Локальный порт CouchDB (nginx → CouchDB)" "$port")"
-                [[ "$p" =~ ^[0-9]+$ ]] && port="$p" || { warn "нужно число — оставляю $port"; read -rp "Enter — продолжить " _ || true; }
-                ;;
-            4)
                 dbname="$(ask "Имя базы (a-z0-9 и _ \$ ( ) + -)" "$dbname")"
                 [[ "$dbname" =~ ^[a-z0-9][a-z0-9_$()+-]*$ ]] || { warn "недопустимое имя базы '$dbname'"; dbname="obsidian"; read -rp "Enter — продолжить " _ || true; }
                 ;;
-            5)
+            4)
                 local md mr
                 md="$(ask "Макс. размер документа, МБ (число)" "$maxdoc")"
                 mr="$(ask "Макс. размер HTTP-запроса, МБ (число)" "$maxreq")"
                 [[ "$md" =~ ^[0-9]+$ ]] && maxdoc="$md" || { warn "нужно число — оставляю $maxdoc"; read -rp "Enter — продолжить " _ || true; }
                 [[ "$mr" =~ ^[0-9]+$ ]] && maxreq="$mr" || { warn "нужно число — оставляю $maxreq"; read -rp "Enter — продолжить " _ || true; }
                 ;;
-            6)
+            5)
                 cors_extra="$(ask "Доп. origins через запятую (напр. http://localhost:8080); пусто — без" "$cors_extra")"
                 cors_extra="${cors_extra// /}"
                 ;;
-            9) break ;;
+            6) break ;;
+            7) remove_couchdb; return 0 ;;
             0) return 0 ;;
             *) warn "нет такого пункта"; read -rp "Enter — продолжить " _ || true ;;
         esac
@@ -84,27 +87,10 @@ SUM
 
     SUB_OBSIDIAN="$subdomain"
     update_env SUB_OBSIDIAN "$subdomain"
-    update_env COUCHDB_PORT "$port"
-    dns_hint "$subdomain"
 
     if [[ "$fresh" == "true" && -n "$new_pass" ]]; then
         COUCHDB_PASSWORD="$new_pass"; update_env COUCHDB_PASSWORD "$new_pass"
     fi
-
-    # Харднинг через override
-    cat > "$CONFIG_ROOT/docker-compose.override.couchdb.yml" <<EOF
-services:
-  couchdb:
-    pids_limit: 400
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - NET_RAW
-      - SYS_PTRACE
-      - SYS_ADMIN
-      - SYS_MODULE
-      - DAC_READ_SEARCH
-EOF
 
     mkdir -p "$COUCHDB_CFG"
     cat > "$COUCHDB_CFG/10-livesync.ini" <<EOF
@@ -130,24 +116,17 @@ EOF
         return 1
     fi
 
-    # Обновляем порт в compose если нужно
-    if grep -q 'couchdb:' "$CONFIG_ROOT/docker-compose.yml" 2>/dev/null; then
-        if ! grep -q "127.0.0.1:${port}:5984" "$CONFIG_ROOT/docker-compose.yml"; then
-            sed -i "s|127.0.0.1:[0-9]\+:5984|127.0.0.1:${port}:5984|" "$CONFIG_ROOT/docker-compose.yml" || \
-            sed -i "s|'5984:5984'|'127.0.0.1:${port}:5984'|" "$CONFIG_ROOT/docker-compose.yml"
-        fi
-    fi
+    docker compose -f "$CONFIG_ROOT/docker-compose.yml" up -d couchdb
 
-    docker compose -f "$CONFIG_ROOT/docker-compose.yml" \
-        -f "$CONFIG_ROOT/docker-compose.override.couchdb.yml" up -d couchdb
-
-    log "Жду healthcheck CouchDB (до 180 секунд)..."
-    local status=""
-    for _ in $(seq 1 90); do
+    log "Жду healthcheck CouchDB (до 30 секунд)..."
+    local status="" cnt=0
+    while [[ $cnt -lt 30 ]]; do
         status=$(docker inspect --format '{{.State.Health.Status}}' homeserver-couchdb-1 2>/dev/null || echo starting)
-        [[ "$status" == "healthy" ]] && break; sleep 2
+        [[ "$status" == "healthy" ]] && break
+        [[ "$status" == "unhealthy" ]] && { warn "CouchDB unhealthy — проверьте логи: docker logs homeserver-couchdb-1"; read -rp "Enter — продолжить " _ || true; return 1; }
+        sleep 1; cnt=$((cnt + 1))
     done
-    [[ "$status" == "healthy" ]] || { warn "CouchDB не поднялся за 180 секунд"; read -rp "Enter — продолжить " _ || true; return 1; }
+    [[ "$status" == "healthy" ]] || { warn "CouchDB не поднялся за 30 секунд"; read -rp "Enter — продолжить " _ || true; return 1; }
 
     for db in _users _replicator "$dbname"; do
         local code
@@ -166,115 +145,95 @@ EOF
     fi
 
     add_site 10-obsidian "server {
-    listen 8443 ssl;
+    listen 127.0.0.1:8443 ssl;
     server_name $subdomain;
     ssl_certificate     $CONFIG_ROOT/config/nginx/certs/fullchain.pem;
     ssl_certificate_key $CONFIG_ROOT/config/nginx/certs/privkey.pem;
     client_max_body_size 4096m;
     location / {
-        proxy_pass http://127.0.0.1:${port};
+        proxy_pass http://127.0.0.1:5984;
         include $CONFIG_ROOT/config/nginx/proxy_common.conf;
     }
 }"
-    update_env SUB_OBSIDIAN "$subdomain"
 
-    show_connection_info "CouchDB (Obsidian LiveSync)" \
-        "URL: https://$subdomain" \
-        "База данных: $dbname" \
-        "Логин: $COUCHDB_USER" \
-        "Пароль: $COUCHDB_PASSWORD" \
-        "Веб-админка Fauxton: https://$subdomain/_utils" \
-        "" \
-        "!!! ВАЖНО: Включите E2E-шифрование в плагине Obsidian !!!" \
-        "  Без E2E заметки хранятся на сервере в ОТКРЫТОМ виде." \
-        "  Settings → Community Plugins → Self-hosted LiveSync → Encryption" \
-        "  Enable End-to-End Encryption + задайте длинный passphrase." \
-        "" \
-        "В плагине Self-hosted LiveSync на каждом устройстве:" \
-        "  URL: https://$subdomain" \
-        "  База: $dbname" \
-        "  Логин: $COUCHDB_USER" \
-        "  Пароль: $COUCHDB_PASSWORD" \
-        "  E2E-passphrase: одинаковый на всех устройствах"
+    echo ""
+    echo "${c_mag}=== Параметры подключения: CouchDB (Obsidian LiveSync) ===${c_off}"
+    echo "  Админка (браузер): https://$subdomain/_utils"
+    echo "  URL (плагин LiveSync): https://$subdomain"
+    echo "  База данных: $dbname"
+    echo "  Логин: $COUCHDB_USER"
+    echo "  Пароль: $COUCHDB_PASSWORD"
+    echo ""
+    echo "${c_txt}⚠ Сохраните эти данные!${c_off}"
+    echo "${c_mag}!!! ВАЖНО: Включите E2E-шифрование в плагине Obsidian !!!${c_off}"
+    echo "  Без E2E заметки хранятся на сервере в ОТКРЫТОМ виде."
+    echo "  Settings → Community Plugins → Self-hosted LiveSync → Encryption"
+    echo "  Enable End-to-End Encryption + задайте длинный passphrase."
+    echo ""
+    echo "В плагине Self-hosted LiveSync на каждом устройстве:"
+    echo "  URL: https://$subdomain"
+    echo "  База: $dbname"
+    echo "  Логин: $COUCHDB_USER"
+    echo "  Пароль: $COUCHDB_PASSWORD"
+    echo "  E2E-passphrase: одинаковый на всех устройствах"
+    echo ""
     read -rp "Enter — продолжить " _ || true
+}
 
-    log_connection_params "CouchDB" \
-        "URL: https://$subdomain" \
-        "База: $dbname" \
-        "Логин: $COUCHDB_USER" \
-        "Пароль: $COUCHDB_PASSWORD" \
-        "Админка: https://$subdomain/_utils"
+couchdb_create_db() {
+    local name
+    name="$(ask "Имя новой базы (a-z0-9 _ \$ ( ) + -)" "")"
+    [[ "$name" =~ ^[a-z0-9][a-z0-9_$()+-]*$ ]] || { warn "недопустимое имя"; read -rp "Enter — продолжить " _ || true; return 1; }
+    local code
+    code=$(docker compose -f "$CONFIG_ROOT/docker-compose.yml" exec -T couchdb curl -s -o /dev/null -w '%{http_code}' \
+        -X PUT -u "$COUCHDB_USER:$COUCHDB_PASSWORD" "http://localhost:5984/$name")
+    [[ "$code" =~ ^(201|412)$ ]] && log "База '$name' создана" || warn "Ошибка создания базы (HTTP $code)"
+    read -rp "Enter — продолжить " _ || true
+}
+
+couchdb_list_dbs() {
+    local list
+    list=$(docker compose -f "$CONFIG_ROOT/docker-compose.yml" exec -T couchdb curl -s -u "$COUCHDB_USER:$COUCHDB_PASSWORD" \
+        "http://localhost:5984/_all_dbs" 2>/dev/null) || list="[]"
+    log "Базы CouchDB: $list"
+    read -rp "Enter — продолжить " _ || true
+}
+
+couchdb_container_logs() {
+    docker compose -f "$COMPOSE_FILE" logs --tail 100 couchdb 2>/dev/null \
+        || warn "не удалось получить логи контейнера"
+    read -rp "Enter — продолжить " _ || true
 }
 
 remove_couchdb() {
     [[ -d "$COUCHDB_DATA" ]] || { warn "CouchDB не установлен"; read -rp "Enter — продолжить " _ || true; return 1; }
     ask_yn "Удалить CouchDB? Все данные будут потеряны." || return 0
 
-    local port="${COUCHDB_PORT:-5984}"
     docker compose -f "$CONFIG_ROOT/docker-compose.yml" down --volumes couchdb 2>/dev/null || true
-    rm -f "$CONFIG_ROOT/docker-compose.override.couchdb.yml"
     rm_site 10-obsidian
     rm -rf "$COUCHDB_DATA" "$COUCHDB_CFG"
     update_env SUB_OBSIDIAN ""
-    update_env COUCHDB_PORT ""
     log "CouchDB удалён"
-    read -rp "Enter — продолжить " _ || true
-}
-
-couchdb_create_db() {
-    [[ -d "$COUCHDB_DATA" ]] || { warn "CouchDB не установлен"; read -rp "Enter — продолжить " _ || true; return 1; }
-    couchdb_running || { warn "CouchDB не запущен"; read -rp "Enter — продолжить " _ || true; return 1; }
-
-    local dbname
-    dbname="$(ask "Имя новой базы (a-z0-9 и _ \$ ( ) + -)" "obsidian_friend")"
-    [[ "$dbname" =~ ^[a-z0-9][a-z0-9_$()+-]*$ ]] || { warn "недопустимое имя базы"; read -rp "Enter — продолжить " _ || true; return 1; }
-
-    local code
-    code=$(docker compose -f "$CONFIG_ROOT/docker-compose.yml" exec -T couchdb curl -s -o /dev/null -w '%{http_code}' \
-        -X PUT -u "$COUCHDB_USER:$COUCHDB_PASSWORD" "http://localhost:5984/$dbname")
-
-    case "$code" in
-        201) log "База '$dbname' создана. Для подключения в Obsidian: URL=https://$SUB_OBSIDIAN, База=$dbname" ;;
-        412) warn "База '$dbname' уже существует" ;;
-        *)   warn "Ошибка создания базы: HTTP $code" ;;
-    esac
-    read -rp "Enter — продолжить " _ || true
-}
-
-couchdb_list_dbs() {
-    [[ -d "$COUCHDB_DATA" ]] || { warn "CouchDB не установлен"; read -rp "Enter — продолжить " _ || true; return 1; }
-    couchdb_running || { warn "CouchDB не запущен"; read -rp "Enter — продолжить " _ || true; return 1; }
-
-    log "Список баз данных:"
-    docker compose -f "$CONFIG_ROOT/docker-compose.yml" exec -T couchdb curl -s \
-        -u "$COUCHDB_USER:$COUCHDB_PASSWORD" "http://localhost:5984/_all_dbs" | \
-        python3 -m json.tool 2>/dev/null || \
-        docker compose -f "$CONFIG_ROOT/docker-compose.yml" exec -T couchdb curl -s \
-        -u "$COUCHDB_USER:$COUCHDB_PASSWORD" "http://localhost:5984/_all_dbs"
     read -rp "Enter — продолжить " _ || true
 }
 
 couchdb_menu() {
     while true; do
-        clear
-        local st="не установлен" svc_st=""
-        if [[ -d "$COUCHDB_DATA" ]]; then
-            st="установлен"
-            if couchdb_running; then
-                svc_st=" | контейнер: active"
-            else
-                svc_st=" | контейнер: not active"
+        local st="не установлен"
+        if [[ -d "$COUCHDB_DATA" && -n "$(ls -A "$COUCHDB_DATA" 2>/dev/null)" ]]; then
+            st="не активен"
+            if docker ps --format '{{.Names}}' 2>/dev/null | grep -qE 'couchdb'; then
+                st="активен"
             fi
         fi
         cat <<SUM
-
-${c_mag} --- CouchDB (Obsidian LiveSync) ${st}${svc_st} ---${c_off}
+${c_mag} --- CouchDB (Obsidian LiveSync) | статус: ${st} ---${c_off}
   ${c_num}1.${c_off} ${c_txt}Установка / переустановка${c_off}
   ${c_num}2.${c_off} ${c_txt}Создать базу данных${c_off}
   ${c_num}3.${c_off} ${c_txt}Список баз данных${c_off}
-  ${c_num}4.${c_off} ${c_txt}Логи${c_off}
-
-  ${c_num}r.${c_off} ${c_txt}Удалить${c_off}
+  ${c_num}4.${c_off} ${c_txt}Логи (follow)${c_off}
+  ${c_num}5.${c_off} ${c_txt}Логи контейнера (последние 100 строк)${c_off}
+  ${c_num}6.${c_off} ${c_txt}Удалить${c_off}
   ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
@@ -282,15 +241,9 @@ SUM
             1) install_couchdb ;;
             2) couchdb_create_db ;;
             3) couchdb_list_dbs ;;
-            4)
-                if [[ -d "$COUCHDB_DATA" ]]; then
-                    docker compose -f "$CONFIG_ROOT/docker-compose.yml" logs --tail=50 couchdb
-                    read -rp "Enter — продолжить " _ || true
-                else
-                    warn "не установлен"; read -rp "Enter — продолжить " _ || true
-                fi
-                ;;
-            r|R) remove_couchdb ;;
+            4) logs_menu couchdb ;;
+            5) couchdb_container_logs ;;
+            6) remove_couchdb ;;
             0) return 0 ;;
             *) warn "нет такого пункта"; read -rp "Enter — продолжить " _ || true ;;
         esac

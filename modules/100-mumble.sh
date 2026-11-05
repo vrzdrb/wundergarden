@@ -33,9 +33,8 @@ ${c_mag} --- Настройки Mumble ---${c_off}   Статус: $st
   ${c_num}6.${c_off} ${c_txt}Протокол: $proto_descr${c_off}
   ${c_num}7.${c_off} ${c_txt}Поддомен: $([[ -n "$mumble_domain" ]] && echo "$mumble_domain" || echo "не задан (используется IP)")${c_off}
   ${c_num}8.${c_off} ${c_txt}Логи${c_off}
-
   ${c_num}9.${c_off} ${c_txt}Установить / Применить${c_off}
-  ${c_txt}r. Удалить${c_off}
+  ${c_num}10.${c_off} ${c_txt}Удалить${c_off}
   ${c_num}0.${c_off} ${c_txt}Назад (без установки)${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
@@ -60,7 +59,7 @@ SUM
                 ;;
             8) logs_menu mumble ;;
             9) break ;;
-            r|R) remove_mumble ;;
+            10) remove_mumble ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
         esac

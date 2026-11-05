@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
 
+# fallback если скрипт запущен не через wundergarden.sh
+command -v rm_site >/dev/null 2>&1 || rm_site() {
+    rm -f "$CONFIG_ROOT/config/nginx/conf.d/${1}.conf"
+    nginx -s reload 2>/dev/null || true
+}
+command -v reload_nginx >/dev/null 2>&1 || reload_nginx() {
+    nginx -s reload 2>/dev/null || true
+}
+command -v add_stream_passthrough >/dev/null 2>&1 || add_stream_passthrough() {
+    log "add_stream_passthrough не определён — пропускаю $1"
+}
+
 install_sftpgo() {
     ensure_prepared
     check_dependencies
@@ -29,7 +41,6 @@ install_sftpgo() {
         [[ -z "$admin_hint_ip" ]] && admin_hint_ip="<IP сервера>"
         clear
         cat <<SUM
-
 ${c_mag} --- Настройки SFTPGo ---${c_off}   Статус: $st
   ${c_txt}Админка: ssh -L 8080:localhost:8080 $admin_hint_user@$admin_hint_ip -> http://localhost:8080/web/admin${c_off}
   ${c_num}1.${c_off} ${c_txt}Папка данных: $sftpdata${c_off}
@@ -40,10 +51,9 @@ ${c_mag} --- Настройки SFTPGo ---${c_off}   Статус: $st
   ${c_num}6.${c_off} ${c_txt}WebDAV через nginx: $webdav_descr${c_off}
   ${c_num}7.${c_off} ${c_txt}Терминация TLS: $tls_descr${c_off}
   ${c_num}8.${c_off} ${c_txt}Логи${c_off}
-
   ${c_num}9.${c_off} ${c_txt}Установить / Применить${c_off}
+  ${c_num}10.${c_off} ${c_txt}Удалить${c_off}
   ${c_num}0.${c_off} ${c_txt}Назад (без установки)${c_off}
-
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
         case "$c" in
@@ -91,6 +101,7 @@ SUM
                 fi ;;
             8) logs_menu sftpgo sftpgo-db ;;
             9) break ;;
+            10) remove_sftpgo; return 0 ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
         esac
@@ -289,4 +300,27 @@ add_stream_passthrough() {
     } > "$map_file"
     log "stream: SNI $domain -> 127.0.0.1:$port (00-map.conf пересобран)"
     reload_nginx
+}
+
+remove_sftpgo() {
+    docker compose -f "$CONFIG_ROOT/docker-compose.yml" down --volumes sftpgo sftpgo-db 2>/dev/null || true
+    rm_site 30-sftpgo
+    rm_site 35-webdav
+    rm -f "$CONFIG_ROOT/config/nginx/stream.d/00-map.conf"
+    reload_nginx
+    local sftpdata="${SFTPGO_DATA:-/opt/homeserver/sftpgo}"
+    if [[ -d "$sftpdata" ]]; then
+        ask_yn "Удалить папку данных $sftpdata?" && rm -rf "$sftpdata" && log "Данные удалены."
+    fi
+    ufw delete allow 2022/tcp comment 'SFTPGo SFTP' >/dev/null 2>&1 || true
+    ufw reload >/dev/null 2>&1 || true
+    update_env SUB_FILES ""
+    update_env SUB_WEBDAV ""
+    update_env SFTPGO_DATA ""
+    update_env SFTPGO_ADMIN_USER ""
+    update_env SFTPGO_ADMIN_PASSWORD ""
+    update_env SFTPGO_TLS_MODE ""
+    update_env SFTPGO_SFTP_BIND ""
+    log "SFTPGo удалён"
+    read -rp "Enter — продолжить " _ || true
 }
