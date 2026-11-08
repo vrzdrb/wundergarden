@@ -324,8 +324,13 @@ services:
     cap_add: [NET_BIND_SERVICE]
     logging: *log
     environment:
-      - VITE_APP_HTTP_STORAGE_BACKEND_URL=https://${SUB_EXCALIDRAW}/storage
-      - VITE_APP_WS_SERVER_URL=https://${SUB_EXCALIDRAW}
+      - VITE_APP_STORAGE_BACKEND=http
+      - VITE_APP_HTTP_STORAGE_BACKEND_URL=https://${SUB_EXCALIDRAW}/storage/api/v2
+      - VITE_APP_BACKEND_V2_GET_URL=https://${SUB_EXCALIDRAW}/storage/api/v2/scenes/
+      - VITE_APP_BACKEND_V2_POST_URL=https://${SUB_EXCALIDRAW}/storage/api/v2/scenes/
+      - VITE_APP_WS_SERVER_URL=https://${SUB_EXCALIDRAW}/
+      - VITE_APP_FIREBASE_CONFIG={}
+      - PUBLIC_URL=https://${SUB_EXCALIDRAW}
     ports:
       - "127.0.0.1:3001:80"
     networks: [net-draw]
@@ -335,6 +340,8 @@ services:
     restart: unless-stopped
     <<: *harden
     logging: *log
+    environment:
+      - PORT=8082
     ports:
       - "127.0.0.1:3012:8082"
     networks: [net-draw]
@@ -344,10 +351,27 @@ services:
     restart: unless-stopped
     <<: *harden
     logging: *log
+    environment:
+      - PORT=8081
+      - STORAGE_URI=mongodb://${EXCALIDRAW_DB_USER:-excalidraw}:${EXCALIDRAW_DB_PASSWORD}@excalidraw-db:27017
     ports:
       - "127.0.0.1:3013:8081"
     volumes:
       - ${EXCALIDRAW_STORAGE:-./data/excalidraw}:/data
+    depends_on: [excalidraw-db]
+    networks: [net-draw]
+
+  excalidraw-db:
+    image: ${EXCALIDRAW_DB_IMAGE:-mongo:7}
+    restart: unless-stopped
+    <<: *harden
+    logging: *log
+    user: "1000"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${EXCALIDRAW_DB_USER:-excalidraw}
+      - MONGO_INITDB_ROOT_PASSWORD=${EXCALIDRAW_DB_PASSWORD}
+    volumes:
+      - ${EXCALIDRAW_DB_DATA:-./data/excalidraw-db}:/data/db
     networks: [net-draw]
 
   sftpgo-db:
@@ -741,6 +765,10 @@ SYNCTHING_GUI_BIND=127.0.0.1:8384
 SYNCTHING_SYNC_DIR=$CONFIG_ROOT/data/syncthing/sync
 SYNCTHING_RESCAN=3600
 EXCALIDRAW_STORAGE=$CONFIG_ROOT/data/excalidraw
+EXCALIDRAW_DB_IMAGE=mongo:7
+EXCALIDRAW_DB_USER=excalidraw
+EXCALIDRAW_DB_PASSWORD=$(gen_pass)
+EXCALIDRAW_DB_DATA=$CONFIG_ROOT/data/excalidraw-db
 SUB_EXCALIDRAW=
 ETHERPAD_DB_PASSWORD=$(gen_pass)
 ETHERPAD_DB_ROOT_PASSWORD=$(gen_pass)
