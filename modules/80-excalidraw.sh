@@ -23,7 +23,7 @@ install_excalidraw() {
           storage="${EXCALIDRAW_STORAGE:-$DATA_DIR/excalidraw}" \
           img_front="${EXCALIDRAW_IMAGE:-alswl/excalidraw:latest}" \
           img_room="${EXCALIDRAW_ROOM_IMAGE:-alswl/excalidraw-room-go:v0.1.0}" \
-          img_storage="${EXCALIDRAW_STORAGE_IMAGE:-alswl/excalidraw-storage-backend:latest}" \
+          img_storage="${EXCALIDRAW_STORAGE_IMAGE:-alswl/excalidraw-storage-backend:v2023.11.11}" \
           user="" pass=""
     dns_hint "$SUB"
 
@@ -40,8 +40,9 @@ ${c_mag} --- Настройки Excalidraw ---${c_off}
   ${c_num}3.${c_off} ${c_txt}Live Collaboration: $collab_descr${c_off}
   ${c_num}4.${c_off} ${c_txt}Папка хранения досок: $storage${c_off}
   ${c_num}5.${c_off} ${c_txt}Образы: ${img_front##*/} | ${img_room##*/} | ${img_storage##*/}${c_off}
-
- ${c_num}6.${c_off} ${c_txt}Логи${c_off}
+  ${c_num}6.${c_off} ${c_txt}Логи${c_off}
+  ${c_num}7.${c_off} ${c_txt}Установить${c_off}
+  ${c_num}8.${c_off} ${c_txt}Удалить${c_off}
   ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
@@ -65,7 +66,9 @@ SUM
                 img_room="$(ask "Образ room-сервера (пин версии, см. README alswl)" "$img_room")"
                 img_storage="$(ask "Образ storage backend" "$img_storage")" ;;
             6) logs_menu excalidraw excalidraw-room excalidraw-storage excalidraw-db ;;
-            0) break ;;
+            7) break ;;
+            8) remove_excalidraw; return 0 ;;
+            0) return 0 ;;
             *) warn "нет такого пункта" ;;
         esac
     done

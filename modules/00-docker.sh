@@ -347,7 +347,7 @@ services:
     networks: [net-draw]
 
   excalidraw-storage:
-    image: ${EXCALIDRAW_STORAGE_IMAGE:-alswl/excalidraw-storage-backend:latest}
+    image: ${EXCALIDRAW_STORAGE_IMAGE:-alswl/excalidraw-storage-backend:v2023.11.11}
     restart: unless-stopped
     <<: *harden
     logging: *log
@@ -745,7 +745,7 @@ REGISTRATION_TOKEN=
 ETHERPAD_IMAGE=etherpad/etherpad:latest
 EXCALIDRAW_IMAGE=alswl/excalidraw:latest
 EXCALIDRAW_ROOM_IMAGE=alswl/excalidraw-room-go:v0.1.0
-EXCALIDRAW_STORAGE_IMAGE=alswl/excalidraw-storage-backend:latest
+EXCALIDRAW_STORAGE_IMAGE=alswl/excalidraw-storage-backend:v2023.11.11
 CLASSQUIZ_IMAGE=ghcr.io/mawoka-myblock/classquiz-backend:master
 CLASSQUIZ_FRONTEND_IMAGE=ghcr.io/mawoka-myblock/classquiz-frontend:master
 LIMESURVEY_IMAGE=limesurvey/limesurvey:latest
