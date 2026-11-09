@@ -1048,14 +1048,14 @@ fail2ban_menu() {
         echo "${c_txt}Порты, используемые приложениями:${c_off}"
 
         require_cmd ss iproute2
-        local listening_ports; listening_ports=$(ss -tlnp 2>/dev/null | awk 'NR>1 {print $4}' | grep -oE '[0-9]+$' | sort -un)
+        local listening_addrs; listening_addrs=$(ss -tlnp 2>/dev/null | awk 'NR>1 {print $4}' | sort -u)
 
-        if [[ -n "$listening_ports" ]]; then
-            printf "  %-15s %s\n" "Порт" "Процесс"
-            printf "  %-15s %s\n" "---" "---"
-            for port in $listening_ports; do
-                local process; process=$(ss -tlnp 2>/dev/null | grep ":${port} " | grep -oP 'users:\(\("\K[^"]+' | head -1 || echo "unknown")
-                printf "  %-15s %s\n" "${port}/tcp" "$process"
+        if [[ -n "$listening_addrs" ]]; then
+            printf "  %-21s %s\n" "Локальный адрес" "Процесс"
+            printf "  %-21s %s\n" "---" "---"
+            for addr in $listening_addrs; do
+                local process; process=$(ss -tlnp 2>/dev/null | awk -v a="$addr" '$4==a' | grep -oP 'users:\(\("\K[^"]+' | head -1 || echo "unknown")
+                printf "  %-21s %s\n" "$addr" "$process"
             done
         else
             echo "${c_txt}  (нет слушающих портов)${c_off}"
