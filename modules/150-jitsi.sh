@@ -9,6 +9,8 @@ jitsi_dc() {
     [[ -f "$JITSI_DIR/docker-compose.override.yml" ]] && files+=(-f docker-compose.override.yml)
     [[ -f "$JITSI_DIR/coturn.yml" ]] && files+=(-f coturn.yml)
     [[ -f "$JITSI_DIR/web-certs.yml" ]] && files+=(-f web-certs.yml)
+    [[ -f "$JITSI_DIR/etherpad.yml" ]] && files+=(-f etherpad.yml)
+    [[ -f "$JITSI_DIR/whiteboard.yml" ]] && files+=(-f whiteboard.yml)
     ( cd "$JITSI_DIR" && docker compose "${files[@]}" "$@" )
 }
 
@@ -71,8 +73,13 @@ install_jitsi() {
         warn "некорректный поддомен"
     done
     domain="${subdomain}.${DOMAIN}"
-    pub_ip="$(ask "Публичный IP (JVB_ADVERTISE_IPS)" "${PUBLIC_IP:-}")"
-    [[ -z "$pub_ip" ]] && { warn "IP обязателен"; return 1; }
+    local detected_ip
+    detected_ip="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
+    while true; do
+        pub_ip="$(ask "Публичный IP (JVB_ADVERTISE_IPS)" "${detected_ip:-${PUBLIC_IP:-}}")"
+        [[ "$pub_ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && break
+        warn "нужен корректный IPv4-адрес"
+    done
 
     echo "${c_txt}Режим доступа:${c_off}"
     echo "  1) За nginx (nginx терминирует TLS; Jitsi на loopback HTTP) [по умолчанию]"
@@ -102,7 +109,7 @@ install_jitsi() {
     echo "${c_txt}TURN: 1) наш существующий coturn (пункт 6; общий секрет с Matrix — нормально)${c_off}"
     echo "${c_txt}     2) собственный coturn этого скрипта (host-network, 3478)${c_off}"
     turn_src="$(ask "1/2" "1")"
-    [[ "$turn_src" == "1" && -z "${SUB_TURN:-}" && -z "${TURN_PASSWORD:-}" ]] && \
+    [[ "$turn_src" == "1" && ( -z "${SUB_TURN:-}" || -z "${TURN_PASSWORD:-}" ) ]] && \
         warn "наш coturn ещё не установлен — сначала пункт 6 (Matrix), либо выберите '2'."
     tz="$(ask "Часовой пояс" "$TZ")"
 
@@ -140,11 +147,22 @@ install_jitsi() {
 
     _jitsi_gen_harden_override
 
+    # Аддоны релиза (etherpad.yml, whiteboard.yml) подключаются только при включённой интеграции (пп.10-11)
+    [[ -z "$(jitsi_get_env ETHERPAD_URL_BASE)" ]] && rm -f "$JITSI_DIR/etherpad.yml"
+    [[ "$(jitsi_get_env WHITEBOARD_ENABLED)" != "true" ]] && rm -f "$JITSI_DIR/whiteboard.yml"
+
     jitsi_set_env CONFIG "$JITSI_CFG"
     jitsi_set_env TZ "$tz"
     jitsi_set_env PUBLIC_URL "https://$domain"
     jitsi_set_env JVB_ADVERTISE_IPS "$pub_ip"
     jitsi_set_env ENABLE_XMPP_WEBSOCKET 1
+    jitsi_set_env START_WITH_AUDIO_MUTED 0
+    jitsi_set_env START_WITH_VIDEO_MUTED 0
+    jitsi_set_env ENABLE_AUTO_OWNER 0
+    jitsi_set_env ENABLE_AV_MODERATION 0
+    # Порты colibri/REST смещены с 8080/8888 (заняты SFTPGo/SearXNG на loopback)
+    jitsi_set_env JVB_COLIBRI_PORT 18080
+    jitsi_set_env JICOFO_REST_PORT 18888
     jitsi_set_env ENABLE_HTTP_REDIRECT 0
     jitsi_set_env JITSI_IMAGE_VERSION "$tag"
     jitsi_set_env VIDEOBRIDGE_MAX_MEMORY "1024m"
@@ -238,10 +256,11 @@ EOF
         ( cd "$JITSI_DIR" && sed -i '/^TURNS_HOST=/d;/^TURNS_PORT=/d' .env )
     fi
 
-    mkdir -p "$JITSI_CFG"/{web,prosody/config,jicofo,jvb}
-    mkdir -p "$JITSI_CFG"/storage/{jibri,prosody}
-    mkdir -p "$JITSI_CFG"/tmp/web-crontabs
-    chmod -R 777 "$JITSI_CFG"/storage "$JITSI_CFG"/tmp 2>/dev/null || true
+    # Полный набор каталогов CONFIG по официальной документации (rootless-контейнеры, chmod 777)
+    mkdir -p "$JITSI_CFG"/{web,prosody/config,prosody/prosody-plugins-custom,jicofo,jvb,jibri}
+    mkdir -p "$JITSI_CFG"/storage/{web,jibri,prosody,transcripts}
+    mkdir -p "$JITSI_CFG"/tmp/{web-crontabs,web-load-test}
+    chmod -R 777 "$JITSI_CFG" 2>/dev/null || true
 
     # UFW
     require_cmd ufw ufw
@@ -251,6 +270,12 @@ EOF
         ufw allow "$proxy_port/tcp" comment "Jitsi stream passthrough" >/dev/null 2>&1 && log "UFW: $proxy_port/tcp открыт" || warn "Ошибка UFW"
     fi
     ufw allow 10000/udp comment 'Jitsi JVB media' >/dev/null 2>&1 && log "UFW: 10000/udp открыт (JVB)" || warn "Ошибка UFW"
+    if [[ "$turn_src" == "2" ]]; then
+        # coturn в network_mode: host полностью подчинён UFW — открываем TURN и relay-диапазон
+        ufw allow 3478/tcp comment 'Jitsi TURN tcp' >/dev/null 2>&1 && log "UFW: 3478/tcp открыт (TURN)" || warn "Ошибка UFW"
+        ufw allow 3478/udp comment 'Jitsi TURN udp' >/dev/null 2>&1 || true
+        ufw allow 49152:65535/udp comment 'Jitsi TURN relay' >/dev/null 2>&1 && log "UFW: 49152-65535/udp открыт (TURN relay)" || warn "Ошибка UFW"
+    fi
     ufw reload >/dev/null 2>&1 || true
 
     jitsi_dc pull
@@ -332,6 +357,10 @@ remove_jitsi() {
     ufw reload >/dev/null 2>&1 || true
 
     if [[ -f "$JITSI_DIR/coturn.yml" ]]; then
+        ufw delete allow 3478/tcp comment 'Jitsi TURN tcp' >/dev/null 2>&1 || true
+        ufw delete allow 3478/udp comment 'Jitsi TURN udp' >/dev/null 2>&1 || true
+        ufw delete allow 49152:65535/udp comment 'Jitsi TURN relay' >/dev/null 2>&1 || true
+        ufw reload >/dev/null 2>&1 || true
         ask_yn "Удалить собственный coturn Jitsi?" && {
             rm -f "$JITSI_DIR/coturn.yml"
             log "Собственный coturn Jitsi удалён"
@@ -384,10 +413,12 @@ jitsi_enable_jwt() {
     jitsi_set_env JWT_APP_ID "$app_id"
     jitsi_set_env JWT_APP_SECRET "$secret"
     jitsi_set_env ENABLE_GUESTS 1
+    jitsi_set_env ENABLE_AV_MODERATION 0
     jitsi_token_server_stop 2>/dev/null || true
     rm -f "$JITSI_TOKEN_DIR/run.sh"
     jitsi_dc up -d --force-recreate
     log "JWT включён. APP_ID=$app_id | APP_SECRET=$secret (сохраните)"
+    log "AV-модерация отключена (ENABLE_AV_MODERATION=0) — участники входят с включённым микрофоном."
     log "Выдача токенов: см. исходный jitsi-auto.sh (Flask-сервер) — добавлю по запросу."
 }
 
@@ -436,6 +467,8 @@ def gen():
     ttl = request.args.get("ttl_hours")
     payload = {"aud": APP_ID, "iss": APP_ID, "sub": HOST, "room": room,
                "context": {"user": {"name": name}}}
+    if request.args.get("moderator") == "1":
+        payload["context"]["user"]["moderator"] = True
     payload["exp"] = int(time.time()) + int(float(ttl) * 3600) if ttl else 32503680000
     return jsonify({"token": jwt.encode(payload, APP_SECRET, algorithm="HS256")})
 
@@ -470,16 +503,21 @@ jitsi_issue_token() {
         warn "недопустимое имя комнаты"
     done
     name="$(ask "Отображаемое имя пользователя" "user")"
+    local role="участник" mod_param=""
+    if ask_yn "Токен с правами модератора?"; then
+        role="модератор"
+        mod_param="&moderator=1"
+    fi
     key="$(jitsi_get_env JITSI_TOKEN_KEY)"
     [[ -z "$key" ]] && die "JITSI_TOKEN_KEY не найден в .env"
     local name_enc; name_enc="$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$name" 2>/dev/null || echo "$name")"
     token="$(curl -fsS --max-time 5 -H "X-Token-Key: $key" \
-        "http://127.0.0.1:5000/token?room=${room}&name=${name_enc}" | grep -o '"token": *"[^"]*"' | cut -d'"' -f4)"
+        "http://127.0.0.1:5000/token?room=${room}&name=${name_enc}${mod_param}" | grep -o '"token": *"[^"]*"' | cut -d'"' -f4)"
     [[ -z "$token" ]] && { warn "токен не получен: $JITSI_TOKEN_DIR/server.log"; return 1; }
     domain="$(jitsi_get_env PUBLIC_URL)"
     cat <<EOF
 
- Токен для комнаты '$room' (показан один раз, сохраните):
+ Токен для комнаты '$room' (роль: $role; показан один раз, сохраните):
    $token
  Ссылка для входа:
    $domain/$room?jwt=$token
@@ -507,6 +545,76 @@ jitsi_token_server_stop() {
     else
         warn "не запущен"
     fi
+}
+
+_jitsi_fetch_addon_yml() {
+    local name="$1"
+    local tag; tag="$(jitsi_get_env JITSI_IMAGE_VERSION)"
+    [[ -z "$tag" ]] && { warn "JITSI_IMAGE_VERSION не найден в .env"; return 1; }
+    curl -fsSL "https://raw.githubusercontent.com/jitsi/docker-jitsi-meet/${tag}/${name}.yml" \
+        -o "$JITSI_DIR/${name}.yml" || { warn "не удалось скачать ${name}.yml для релиза ${tag}"; return 1; }
+}
+
+jitsi_etherpad_setup() {
+    [[ -f "$JITSI_DIR/.env" ]] || { warn "сначала п.1 (установка)"; return 1; }
+    clear
+    echo "${c_mag}=== Интеграция Etherpad ===${c_off}"
+    if [[ -n "$(jitsi_get_env ETHERPAD_URL_BASE)" ]]; then
+        echo "${c_txt}Статус: включена${c_off}"
+        ask_yn "Отключить?" || return 0
+        ( cd "$JITSI_DIR" && sed -i '/^ETHERPAD_URL_BASE=/d;/^ETHERPAD_PUBLIC_URL=/d;/^ETHERPAD_TITLE=/d;/^ETHERPAD_DEFAULT_PAD_TEXT=/d' .env )
+        rm -f "$JITSI_DIR/etherpad.yml"
+        jitsi_dc up -d
+        log "Etherpad-интеграция отключена"
+        read -rp "Enter — продолжить " _ || true
+        return 0
+    fi
+    echo "${c_txt}Разворачивается свой контейнер etherpad/etherpad в сети Jitsi;${c_off}"
+    echo "${c_txt}web-контейнер Jitsi проксирует его на /etherpad/ (официальный механизм docker-jitsi-meet).${c_off}"
+    ask_yn "Включить интеграцию Etherpad?" || return 0
+    local etitle etext epub puburl
+    puburl="$(jitsi_get_env PUBLIC_URL)"
+    etitle="$(ask "Заголовок Etherpad (пусто = без заголовка)" "")"
+    etext="$(ask "Текст нового документа по умолчанию" "Добро пожаловать в совместный документ!")"
+    epub="$(ask "Публичный URL Etherpad (пусто = ${puburl}/etherpad/)" "")"
+    _jitsi_fetch_addon_yml etherpad || return 1
+    jitsi_set_env ETHERPAD_URL_BASE "http://etherpad.meet.jitsi:9001"
+    [[ -n "$etitle" ]] && jitsi_set_env ETHERPAD_TITLE "$etitle"
+    [[ -n "$etext" ]] && jitsi_set_env ETHERPAD_DEFAULT_PAD_TEXT "$etext"
+    [[ -n "$epub" ]] && jitsi_set_env ETHERPAD_PUBLIC_URL "$epub"
+    jitsi_dc pull etherpad || warn "pull etherpad не удался — проверьте сеть"
+    jitsi_dc up -d || die "ошибка запуска: cd $JITSI_DIR && docker compose logs"
+    log "Etherpad включён: ${epub:-${puburl}/etherpad/} (кнопка «Открыть совместный документ» в конференции)"
+    read -rp "Enter — продолжить " _ || true
+}
+
+jitsi_whiteboard_setup() {
+    [[ -f "$JITSI_DIR/.env" ]] || { warn "сначала п.1 (установка)"; return 1; }
+    clear
+    echo "${c_mag}=== Интеграция Excalidraw (доска) ===${c_off}"
+    if [[ "$(jitsi_get_env WHITEBOARD_ENABLED)" == "true" ]]; then
+        echo "${c_txt}Статус: включена${c_off}"
+        ask_yn "Отключить?" || return 0
+        ( cd "$JITSI_DIR" && sed -i '/^WHITEBOARD_ENABLED=/d;/^WHITEBOARD_COLLAB_SERVER_URL_BASE=/d;/^WHITEBOARD_COLLAB_SERVER_PUBLIC_URL=/d' .env )
+        rm -f "$JITSI_DIR/whiteboard.yml"
+        jitsi_dc up -d
+        log "Интеграция доски отключена"
+        read -rp "Enter — продолжить " _ || true
+        return 0
+    fi
+    echo "${c_txt}Разворачивается контейнер jitsi/excalidraw-backend в сети Jitsi;${c_off}"
+    echo "${c_txt}web-контейнер Jitsi проксирует его на /socket.io/ (официальный механизм docker-jitsi-meet).${c_off}"
+    ask_yn "Включить интерактивную доску (Excalidraw)?" || return 0
+    local wpub
+    wpub="$(ask "Публичный URL сервера доски (пусто = прокси Jitsi)" "")"
+    _jitsi_fetch_addon_yml whiteboard || return 1
+    jitsi_set_env WHITEBOARD_ENABLED "true"
+    jitsi_set_env WHITEBOARD_COLLAB_SERVER_URL_BASE "http://whiteboard.meet.jitsi"
+    [[ -n "$wpub" ]] && jitsi_set_env WHITEBOARD_COLLAB_SERVER_PUBLIC_URL "$wpub"
+    jitsi_dc pull whiteboard || warn "pull whiteboard не удался — проверьте сеть"
+    jitsi_dc up -d || die "ошибка запуска: cd $JITSI_DIR && docker compose logs"
+    log "Доска включена (кнопка «Показать доску» в конференции)"
+    read -rp "Enter — продолжить " _ || true
 }
 
 jitsi_menu() {
@@ -540,6 +648,8 @@ ${c_mag} --- Jitsi Meet ${st}${svc_st}${turn_st} ---${c_off}
   ${c_num}7.${c_off} ${c_txt}Остановить token-сервер${c_off}
   ${c_num}8.${c_off} ${c_txt}Логи${c_off}
   ${c_num}9.${c_off} ${c_txt}Удалить${c_off}
+  ${c_num}10.${c_off} ${c_txt}Интеграция Etherpad (совместные документы)${c_off}
+  ${c_num}11.${c_off} ${c_txt}Интеграция Excalidraw (доска)${c_off}
   ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
@@ -560,6 +670,8 @@ SUM
                 read -rp "Enter — продолжить " _ || true
                 ;;
             9) remove_jitsi ;;
+            10) jitsi_etherpad_setup ;;
+            11) jitsi_whiteboard_setup ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
         esac

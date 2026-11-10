@@ -333,6 +333,12 @@ services:
       - PUBLIC_URL=https://${SUB_EXCALIDRAW}
     ports:
       - "127.0.0.1:3001:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     networks: [net-draw]
 
   excalidraw-room:
