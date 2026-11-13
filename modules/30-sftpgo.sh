@@ -33,7 +33,7 @@ install_sftpgo() {
         [[ -n "$cloud_user" ]] && cloud_descr="$cloud_user (квота ${cloud_quota} МБ)"
         [[ "$sftp_ext" == "true" ]] && sftp_descr="вкл (0.0.0.0:2022)"
         [[ "$webdav" == "true" ]] && webdav_descr="https://$SUB_WEBDAV"
-        [[ "$tls_mode" == "xray" ]] && tls_descr="127.0.0.1:7443 (прокси)"
+        [[ "$tls_mode" == "xray" ]] && tls_descr="127.0.0.1:7443 (REALITY)"
         docker compose ps -q sftpgo 2>/dev/null | grep -q . && st="установлен"
         local admin_hint_user="${SUDO_USER:-$USER}"
         local admin_hint_ip="${PUBLIC_IP:-}"
@@ -94,9 +94,12 @@ SUM
                 if [[ "$tls_mode" == "xray" ]]; then tls_mode="direct"
                 else
                     tls_mode="xray"
-                    echo "${c_txt}Режим 'через xray': nginx НЕ терминирует TLS для $SUB_FILES.${c_off}"
-                    echo "${c_txt}SNI $SUB_FILES будет проброшен на 127.0.0.1:7443 (inbound xray VLESS+TLS).${c_off}"
-                    echo "${c_txt}xray должен завершать TLS тем же сертификатом, fallback dest: 127.0.0.1:8081.${c_off}"
+                    echo "${c_txt}Режим 'через xray (REALITY)': nginx НЕ получает SNI $SUB_FILES напрямую.${c_off}"
+                    echo "${c_txt}SNI $SUB_FILES будет проброшен на 127.0.0.1:7443 (inbound xray VLESS+REALITY).${c_off}"
+                    echo "${c_txt}VLESS-клиенты: TLS 1.3 завершает xray (REALITY).${c_off}"
+                    echo "${c_txt}Браузеры: xray пробрасывает handshake в dest 127.0.0.1:8443 — TLS 1.2/1.3${c_off}"
+                    echo "${c_txt}завершает этот nginx, сайт на 8443 обслуживает веб-клиент.${c_off}"
+                    echo "${c_txt}Требование к скрипту xray: inbound 7443 с dest: 127.0.0.1:8443 (настраивается там).${c_off}"
                     ask_yn "Продолжить?" || tls_mode="direct"
                 fi ;;
             8) logs_menu sftpgo sftpgo-db ;;
@@ -174,9 +177,11 @@ SUM
     fi
 
     # --- nginx ---
-    if [[ "$tls_mode" == "direct" ]]; then
-        # nginx сам терминирует TLS (loopback-only), в sftpgo — plain HTTP.
-        add_site 30-sftpgo "server {
+    # Сайт одинаковый в обоих режимах: nginx терминирует TLS (loopback-only),
+    # в sftpgo — plain HTTP. Режим 'xray' отличается только тем, что SNI домена
+    # идёт на xray:7443 (REALITY), а xray пробрасывает браузерный handshake
+    # в dest 127.0.0.1:8443 — сюда же, этот сайт его и обслуживает.
+    add_site 30-sftpgo "server {
     listen 127.0.0.1:8443 ssl;
     server_name $SUB_FILES;
     ssl_certificate     $CONFIG_ROOT/config/nginx/certs/fullchain.pem;
@@ -188,21 +193,9 @@ SUM
         include $CONFIG_ROOT/config/nginx/proxy_common.conf;
     }
 }"
-    else
-        # 'Столик': plain HTTP на loopback. Xray завершает TLS и шлёт fallback
-        # сюда; мы вкладываем X-Forwarded-Proto: https и прячем админку.
-        add_site 30-sftpgo "server {
-    listen 127.0.0.1:8081;
-    server_name $SUB_FILES;
-    client_max_body_size 0;
-    location /web/admin { return 403; }
-    location / {
-        proxy_pass http://127.0.0.1:8080;
-        include $CONFIG_ROOT/config/nginx/proxy_common.conf;
-        proxy_set_header X-Forwarded-Proto https;
-    }
-}"
-        # Проброс SNI files.$SUB_FILES на xray (127.0.0.1:7443) через stream.
+
+    if [[ "$tls_mode" == "xray" ]]; then
+        # Проброс SNI $SUB_FILES на xray (127.0.0.1:7443) через stream.
         add_stream_passthrough "$SUB_FILES" 7443
     fi
 
@@ -248,9 +241,10 @@ SUM
     fi
 
     if [[ "$tls_mode" == "xray" ]]; then
-        conn_params+=("" "TLS завершает xray: SNI $SUB_FILES -> 127.0.0.1:7443 (VLESS+TLS)")
-        conn_params+=("  fallback dest (не-VLESS): 127.0.0.1:8081 -> sftpgo:8080")
-        log_params+=("TLS: xray 127.0.0.1:7443, fallback 127.0.0.1:8081")
+        conn_params+=("" "TLS: SNI $SUB_FILES -> 127.0.0.1:7443 (xray VLESS+REALITY)")
+        conn_params+=("  VLESS-клиенты: TLS 1.3 завершает xray (REALITY)")
+        conn_params+=("  Браузеры: dest xray 127.0.0.1:8443 -> этот nginx (TLS 1.2/1.3)")
+        log_params+=("TLS: xray 127.0.0.1:7443 (REALITY), dest 127.0.0.1:8443")
     fi
 
     if [[ "$webdav" == "true" ]]; then

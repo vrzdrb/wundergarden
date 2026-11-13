@@ -99,10 +99,10 @@ http {
     }
 
     server {
-        listen 127.0.0.1:8443 ssl;
+        listen 127.0.0.1:8443 ssl default_server;
         ssl_certificate     $NGINX_CONFIG_DIR/certs/fullchain.pem;
         ssl_certificate_key $NGINX_CONFIG_DIR/certs/privkey.pem;
-        return 444;
+        return 404;
     }
 
     include $NGINX_CONFIG_DIR/conf.d/*.conf;
@@ -192,11 +192,7 @@ add_stream() {
 mk_htpasswd() {
     mkdir -p "$NGINX_CONFIG_DIR/htpasswd"
     printf '%s:%s\n' "$2" "$(openssl passwd -apr1 "$3")" > "$NGINX_CONFIG_DIR/htpasswd/$1"
-    if chown root:www-data "$NGINX_CONFIG_DIR/htpasswd/$1" 2>/dev/null; then
-        chmod 640 "$NGINX_CONFIG_DIR/htpasswd/$1" || true
-    else
-        chmod 644 "$NGINX_CONFIG_DIR/htpasswd/$1" || true
-    fi
+    chmod 640 "$NGINX_CONFIG_DIR/htpasswd/$1" || true
 }
 
 auth_conf() {
