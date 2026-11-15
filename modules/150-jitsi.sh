@@ -209,6 +209,10 @@ install_jitsi() {
         jitsi_set_env TURN_PORT 3478
         jitsi_set_env TURN_TRANSPORT "tcp,udp"
         jitsi_set_env TURN_CREDENTIALS "$TURN_PASSWORD"
+        if command -v ufw >/dev/null 2>&1 && ! ufw status 2>/dev/null | grep -q "3478"; then
+            warn "UFW: правило для 3478 не найдено — TURN не будет работать для клиентов за жёсткими NAT"
+            warn "Откройте порт: ufw allow 3478/tcp и ufw allow 3478/udp, либо установите coturn через меню Matrix"
+        fi
     else
         local secret; secret="$(gen_pass)"
         mkdir -p "$JITSI_CFG/coturn"
@@ -239,6 +243,8 @@ EOF
         jitsi_set_env TURN_TRANSPORT "tcp,udp"
         jitsi_set_env TURN_CREDENTIALS "$secret"
         ( cd "$JITSI_DIR" && sed -i '/^TURNS_HOST=/d;/^TURNS_PORT=/d' .env )
+        ufw allow 3478/tcp comment 'Jitsi TURN' >/dev/null 2>&1 && log "UFW: 3478/tcp открыт (TURN)" || warn "Ошибка UFW (3478/tcp)"
+        ufw allow 3478/udp comment 'Jitsi TURN' >/dev/null 2>&1 && log "UFW: 3478/udp открыт (TURN)" || warn "Ошибка UFW (3478/udp)"
     fi
 
     mkdir -p "$JITSI_CFG"/{web,prosody/config,jicofo,jvb}
@@ -336,6 +342,13 @@ remove_jitsi() {
     if [[ -f "$JITSI_DIR/coturn.yml" ]]; then
         ask_yn "Удалить собственный coturn Jitsi?" && {
             rm -f "$JITSI_DIR/coturn.yml"
+            if [[ -f "$DATA_DIR/coturn/turnserver.conf" ]]; then
+                warn "UFW: правила 3478 сохранены — порт используется общим coturn (Matrix)"
+            else
+                ufw delete allow 3478/tcp >/dev/null 2>&1 || true
+                ufw delete allow 3478/udp >/dev/null 2>&1 || true
+                log "UFW: правила 3478/tcp и 3478/udp удалены"
+            fi
             log "Собственный coturn Jitsi удалён"
         }
     else
