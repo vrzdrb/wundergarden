@@ -9,6 +9,9 @@ jitsi_dc() {
     [[ -f "$JITSI_DIR/docker-compose.override.yml" ]] && files+=(-f docker-compose.override.yml)
     [[ -f "$JITSI_DIR/coturn.yml" ]] && files+=(-f coturn.yml)
     [[ -f "$JITSI_DIR/web-certs.yml" ]] && files+=(-f web-certs.yml)
+    # Интеграции по офиц. документации: https://jitsi.github.io/handbook/docs/devops-guide/devops-guide-docker/
+    [[ -n "$(jitsi_get_env ETHERPAD_URL_BASE)" && -f "$JITSI_DIR/etherpad.yml" ]] && files+=(-f etherpad.yml)
+    [[ "$(jitsi_get_env WHITEBOARD_ENABLED)" =~ ^(1|true)$ && -f "$JITSI_DIR/whiteboard.yml" ]] && files+=(-f whiteboard.yml)
     ( cd "$JITSI_DIR" && docker compose "${files[@]}" "$@" )
 }
 
@@ -394,6 +397,86 @@ jitsi_enable_jwt() {
 
 install_jitsi_entry() { install_jitsi; }
 
+# ---------- Etherpad / Excalidraw (официальные интеграции docker-jitsi-meet) ----------
+
+# Файлы etherpad.yml и whiteboard.yml входят в архив релиза docker-jitsi-meet.
+# Если их нет (например, старая установка) — создаём официальные версии.
+_ensure_etherpad_yml() {
+    [[ -f "$JITSI_DIR/etherpad.yml" ]] && return 0
+    cat > "$JITSI_DIR/etherpad.yml" <<'EOF'
+services:
+    # Etherpad: real-time collaborative document editing
+    etherpad:
+        image: etherpad/etherpad:2.0.3
+        restart: ${RESTART_POLICY:-unless-stopped}
+        environment:
+            - TITLE=${ETHERPAD_TITLE:-""}
+            - DEFAULT_PAD_TEXT=${ETHERPAD_DEFAULT_PAD_TEXT:-""}
+            - SKIN_NAME=${ETHERPAD_SKIN_NAME:-colibris}
+            - SKIN_VARIANTS=${ETHERPAD_SKIN_VARIANTS:-"super-light-toolbar super-light-editor light-background full-width-editor"}
+            - SUPPRESS_ERRORS_IN_PAD_TEXT=true
+        networks:
+            meet.jitsi:
+                aliases:
+                    - etherpad.meet.jitsi
+EOF
+    warn "etherpad.yml не найден в релизе — создан официальный файл (stable-11248-3)"
+}
+
+_ensure_whiteboard_yml() {
+    [[ -f "$JITSI_DIR/whiteboard.yml" ]] && return 0
+    cat > "$JITSI_DIR/whiteboard.yml" <<'EOF'
+services:
+    whiteboard:
+        image: jitsi/excalidraw-backend:2026.3.0
+        restart: ${RESTART_POLICY:-unless-stopped}
+        depends_on:
+            - web
+        networks:
+            meet.jitsi:
+              aliases:
+                  - whiteboard.meet.jitsi
+EOF
+    warn "whiteboard.yml не найден в релизе — создан официальный файл (stable-11248-3)"
+}
+
+jitsi_etherpad_toggle() {
+    [[ -f "$JITSI_DIR/.env" ]] || { warn "сначала п.1 (установка)"; return 1; }
+    if [[ -n "$(jitsi_get_env ETHERPAD_URL_BASE)" ]]; then
+        ask_yn "Etherpad включён — отключить?" || return 0
+        ( cd "$JITSI_DIR" && sed -i '/^ETHERPAD_URL_BASE=/d;/^ETHERPAD_TITLE=/d' .env )
+        jitsi_dc rm -sf etherpad 2>/dev/null || true
+        jitsi_dc up -d
+        log "Etherpad отключён"
+    else
+        _ensure_etherpad_yml
+        local title; title="$(ask "Название Etherpad (TITLE)" "Wundergarden Etherpad")"
+        jitsi_set_env ETHERPAD_TITLE "$title"
+        jitsi_set_env ETHERPAD_URL_BASE "http://etherpad.meet.jitsi:9001"
+        jitsi_dc up -d
+        log "Etherpad включён: в конференции появится кнопка «Открыть совместный документ»"
+    fi
+    read -rp "Enter — продолжить " _ || true
+}
+
+jitsi_whiteboard_toggle() {
+    [[ -f "$JITSI_DIR/.env" ]] || { warn "сначала п.1 (установка)"; return 1; }
+    if [[ "$(jitsi_get_env WHITEBOARD_ENABLED)" =~ ^(1|true)$ ]]; then
+        ask_yn "Доска Excalidraw включена — отключить?" || return 0
+        ( cd "$JITSI_DIR" && sed -i '/^WHITEBOARD_ENABLED=/d;/^WHITEBOARD_COLLAB_SERVER_URL_BASE=/d;/^WHITEBOARD_COLLAB_SERVER_PUBLIC_URL=/d' .env )
+        jitsi_dc rm -sf whiteboard 2>/dev/null || true
+        jitsi_dc up -d
+        log "Доска Excalidraw отключена"
+    else
+        _ensure_whiteboard_yml
+        jitsi_set_env WHITEBOARD_ENABLED true
+        jitsi_set_env WHITEBOARD_COLLAB_SERVER_URL_BASE "http://whiteboard.meet.jitsi"
+        jitsi_dc up -d
+        log "Доска Excalidraw включена: в конференции появится кнопка «Открыть совместную доску»"
+    fi
+    read -rp "Enter — продолжить " _ || true
+}
+
 jitsi_token_server_running() {
     [[ -f "$JITSI_TOKEN_DIR/server.pid" ]] && kill -0 "$(cat "$JITSI_TOKEN_DIR/server.pid")" 2>/dev/null
 }
@@ -524,7 +607,9 @@ jitsi_menu() {
         if [[ -d "$JITSI_DIR" ]]; then
             st="установлен"
             if jitsi_token_server_running; then
-                svc_st=" | token: active"
+                svc_st=" | token: вкл"
+            else
+                svc_st=" | token: выкл"
             fi
             if docker ps --format '{{.Names}}' 2>/dev/null | grep -qE 'jitsi|jicofo|jvb|prosody'; then
                 svc_st="${svc_st} | контейнеры: active"
@@ -536,6 +621,10 @@ jitsi_menu() {
             else
                 turn_st=" | coturn: общий"
             fi
+            local ep_st=" | etherpad: выкл" wb_st=" | доска: выкл"
+            [[ -n "$(jitsi_get_env ETHERPAD_URL_BASE)" ]] && ep_st=" | etherpad: вкл"
+            [[ "$(jitsi_get_env WHITEBOARD_ENABLED)" =~ ^(1|true)$ ]] && wb_st=" | доска: вкл"
+            svc_st="${svc_st}${ep_st}${wb_st}"
         fi
         cat <<SUM
 ${c_mag} --- Jitsi Meet ${st}${svc_st}${turn_st} ---${c_off}
@@ -548,6 +637,8 @@ ${c_mag} --- Jitsi Meet ${st}${svc_st}${turn_st} ---${c_off}
   ${c_num}7.${c_off} ${c_txt}Остановить token-сервер${c_off}
   ${c_num}8.${c_off} ${c_txt}Логи${c_off}
   ${c_num}9.${c_off} ${c_txt}Удалить${c_off}
+ ${c_num}10.${c_off} ${c_txt}Etherpad: совместные документы (вкл/выкл)${c_off}
+ ${c_num}11.${c_off} ${c_txt}Excalidraw: совместная доска (вкл/выкл)${c_off}
   ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
@@ -568,6 +659,8 @@ SUM
                 read -rp "Enter — продолжить " _ || true
                 ;;
             9) remove_jitsi ;;
+            10) jitsi_etherpad_toggle ;;
+            11) jitsi_whiteboard_toggle ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
         esac

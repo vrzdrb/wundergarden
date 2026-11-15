@@ -192,6 +192,7 @@ add_stream() {
 mk_htpasswd() {
     mkdir -p "$NGINX_CONFIG_DIR/htpasswd"
     printf '%s:%s\n' "$2" "$(openssl passwd -apr1 "$3")" > "$NGINX_CONFIG_DIR/htpasswd/$1"
+    chown root:www-data "$NGINX_CONFIG_DIR/htpasswd/$1"
     chmod 640 "$NGINX_CONFIG_DIR/htpasswd/$1" || true
 }
 
