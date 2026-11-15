@@ -192,7 +192,7 @@ services:
     networks: [net-cal]
 
   sftpgo:
-    image: drakkan/sftpgo:latest-alpine
+    image: drakkan/sftpgo:v2-alpine
     restart: unless-stopped
     <<: *harden
     logging: *log
@@ -213,7 +213,7 @@ services:
     volumes:
       - ${SFTPGO_DATA}:/var/lib/sftpgo
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8082:8080"
       - "127.0.0.1:8090:8090"
       - ${SFTPGO_SFTP_BIND:-127.0.0.1:2022}:2022
     healthcheck:
