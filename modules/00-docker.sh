@@ -591,10 +591,13 @@ services:
       - GITEA__database__NAME=gitea
       - GITEA__database__USER=gitea
       - GITEA__database__PASSWD=${GITEA_DB_PASSWORD}
-      - GITEA__server__PROTOCOL=http
+      # HTTPS терминирует сама gitea (stream passthrough через nginx:443)
+      - GITEA__server__PROTOCOL=https
       - GITEA__server__HTTP_PORT=3000
       - GITEA__server__DOMAIN=${SUB_GITEA}
       - GITEA__server__ROOT_URL=https://${SUB_GITEA}/
+      - GITEA__server__CERT_FILE=/data/certs/fullchain.pem
+      - GITEA__server__KEY_FILE=/data/certs/privkey.pem
       - GITEA__server__DISABLE_SSH=true
       - GITEA__server__LFS_START_SERVER=false
       - GITEA__service__DISABLE_REGISTRATION=true
@@ -607,9 +610,9 @@ services:
     volumes:
       - ./data/gitea:/data
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${GITEA_PORT:-3000}:3000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ >/dev/null 2>&1 || curl -fsS http://localhost:3000/ >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget --no-check-certificate -qO- https://localhost:3000/ >/dev/null 2>&1 || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -799,6 +802,8 @@ SUB_LIMESURVEY=
 SEARXNG_SECRET=$(gen_pass)
 SEARCH_PW=
 SUB_GITEA=
+GITEA_PORT=3000
+GITEA_STREAM_PORT=
 GITEA_DB_PASSWORD=$(gen_pass)
 EOF
         chmod 600 "$ENV_FILE"
