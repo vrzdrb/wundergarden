@@ -9,9 +9,6 @@ jitsi_dc() {
     [[ -f "$JITSI_DIR/docker-compose.override.yml" ]] && files+=(-f docker-compose.override.yml)
     [[ -f "$JITSI_DIR/coturn.yml" ]] && files+=(-f coturn.yml)
     [[ -f "$JITSI_DIR/web-certs.yml" ]] && files+=(-f web-certs.yml)
-    # Интеграции по офиц. документации: https://jitsi.github.io/handbook/docs/devops-guide/devops-guide-docker/
-    [[ -n "$(jitsi_get_env ETHERPAD_URL_BASE)" && -f "$JITSI_DIR/etherpad.yml" ]] && files+=(-f etherpad.yml)
-    [[ "$(jitsi_get_env WHITEBOARD_ENABLED)" =~ ^(1|true)$ && -f "$JITSI_DIR/whiteboard.yml" ]] && files+=(-f whiteboard.yml)
     ( cd "$JITSI_DIR" && docker compose "${files[@]}" "$@" )
 }
 
@@ -36,7 +33,7 @@ rebuild_stream_map() {
     local lst="${STREAM_DOMAINS:-}"
     local map_file="$NGINX_CONFIG_DIR/stream.d/00-map.conf"
     {
-        echo "map \\$ssl_preread_server_name \\$stream_upstream {"
+        echo 'map $ssl_preread_server_name $stream_upstream {'
         local entry d p seen_ports=""
         if [[ -n "$lst" ]]; then
             IFS=','; for entry in $lst; do
@@ -186,18 +183,18 @@ install_jitsi() {
             sed -i '/HTTPS_PORT/d' docker-compose.yml
             sed -i "s|\\\${HTTP_PORT}:8000|127.0.0.1:${jitsi_port}:8000|" docker-compose.yml
             # Stream passthrough
+            # Синхронизируем .env и переменную сессии ДО пересборки мапы,
+            # иначе rebuild пройдёт по устаревшему значению STREAM_DOMAINS.
             local new_entry="${domain}:${proxy_port}"
-            if [[ -n "${STREAM_DOMAINS:-}" ]]; then
-                if [[ ",${STREAM_DOMAINS}," != *",${domain}:"* ]]; then
-                    update_env STREAM_DOMAINS "${STREAM_DOMAINS},${new_entry}"
-                else
-                    local updated="${STREAM_DOMAINS}"
-                    updated="$(echo "$updated" | sed "s|[^,]*${domain}:[0-9]*|${new_entry}|g")"
-                    update_env STREAM_DOMAINS "$updated"
-                fi
+            if [[ -n "${STREAM_DOMAINS:-}" && ",${STREAM_DOMAINS}," == *",${domain}:"* ]]; then
+                STREAM_DOMAINS="$(echo "$STREAM_DOMAINS" | sed "s|[^,]*${domain}:[0-9]*|${new_entry}|g")"
+            elif [[ -n "${STREAM_DOMAINS:-}" ]]; then
+                STREAM_DOMAINS="${STREAM_DOMAINS},${new_entry}"
             else
-                update_env STREAM_DOMAINS "$new_entry"
+                STREAM_DOMAINS="$new_entry"
             fi
+            update_env STREAM_DOMAINS "$STREAM_DOMAINS"
+            export STREAM_DOMAINS
             rebuild_stream_map
             reload_nginx 2>/dev/null || true
             ;;
@@ -209,10 +206,6 @@ install_jitsi() {
         jitsi_set_env TURN_PORT 3478
         jitsi_set_env TURN_TRANSPORT "tcp,udp"
         jitsi_set_env TURN_CREDENTIALS "$TURN_PASSWORD"
-        if command -v ufw >/dev/null 2>&1 && ! ufw status 2>/dev/null | grep -q "3478"; then
-            warn "UFW: правило для 3478 не найдено — TURN не будет работать для клиентов за жёсткими NAT"
-            warn "Откройте порт: ufw allow 3478/tcp и ufw allow 3478/udp, либо установите coturn через меню Matrix"
-        fi
     else
         local secret; secret="$(gen_pass)"
         mkdir -p "$JITSI_CFG/coturn"
@@ -243,8 +236,6 @@ EOF
         jitsi_set_env TURN_TRANSPORT "tcp,udp"
         jitsi_set_env TURN_CREDENTIALS "$secret"
         ( cd "$JITSI_DIR" && sed -i '/^TURNS_HOST=/d;/^TURNS_PORT=/d' .env )
-        ufw allow 3478/tcp comment 'Jitsi TURN' >/dev/null 2>&1 && log "UFW: 3478/tcp открыт (TURN)" || warn "Ошибка UFW (3478/tcp)"
-        ufw allow 3478/udp comment 'Jitsi TURN' >/dev/null 2>&1 && log "UFW: 3478/udp открыт (TURN)" || warn "Ошибка UFW (3478/udp)"
     fi
 
     mkdir -p "$JITSI_CFG"/{web,prosody/config,jicofo,jvb}
@@ -318,12 +309,14 @@ remove_jitsi() {
     rm_site 150-jitsi
 
     # Удаляем stream passthrough если был режим 2b
+    # load_env: в свежей сессии STREAM_DOMAINS пуста и очистка пропускалась бы
+    [[ -f "$ENV_FILE" ]] && load_env
     if [[ "$mode" == "2b" && -n "$domain" && -n "${STREAM_DOMAINS:-}" ]]; then
-        local updated
-        updated="$(echo "$STREAM_DOMAINS" | sed "s|[^,]*${domain}:[0-9]*||g")"
-        updated="${updated#,}"; updated="${updated%,}"
-        updated="${updated//,,/,}"
-        update_env STREAM_DOMAINS "$updated"
+        STREAM_DOMAINS="$(echo "$STREAM_DOMAINS" | sed "s|[^,]*${domain}:[0-9]*||g")"
+        STREAM_DOMAINS="${STREAM_DOMAINS#,}"; STREAM_DOMAINS="${STREAM_DOMAINS%,}"
+        STREAM_DOMAINS="${STREAM_DOMAINS//,,/,}"
+        update_env STREAM_DOMAINS "$STREAM_DOMAINS"
+        export STREAM_DOMAINS
         rebuild_stream_map
         reload_nginx 2>/dev/null || true
     fi
@@ -342,13 +335,6 @@ remove_jitsi() {
     if [[ -f "$JITSI_DIR/coturn.yml" ]]; then
         ask_yn "Удалить собственный coturn Jitsi?" && {
             rm -f "$JITSI_DIR/coturn.yml"
-            if [[ -f "$DATA_DIR/coturn/turnserver.conf" ]]; then
-                warn "UFW: правила 3478 сохранены — порт используется общим coturn (Matrix)"
-            else
-                ufw delete allow 3478/tcp >/dev/null 2>&1 || true
-                ufw delete allow 3478/udp >/dev/null 2>&1 || true
-                log "UFW: правила 3478/tcp и 3478/udp удалены"
-            fi
             log "Собственный coturn Jitsi удалён"
         }
     else
@@ -409,86 +395,6 @@ jitsi_enable_jwt() {
 }
 
 install_jitsi_entry() { install_jitsi; }
-
-# ---------- Etherpad / Excalidraw (официальные интеграции docker-jitsi-meet) ----------
-
-# Файлы etherpad.yml и whiteboard.yml входят в архив релиза docker-jitsi-meet.
-# Если их нет (например, старая установка) — создаём официальные версии.
-_ensure_etherpad_yml() {
-    [[ -f "$JITSI_DIR/etherpad.yml" ]] && return 0
-    cat > "$JITSI_DIR/etherpad.yml" <<'EOF'
-services:
-    # Etherpad: real-time collaborative document editing
-    etherpad:
-        image: etherpad/etherpad:2.0.3
-        restart: ${RESTART_POLICY:-unless-stopped}
-        environment:
-            - TITLE=${ETHERPAD_TITLE:-""}
-            - DEFAULT_PAD_TEXT=${ETHERPAD_DEFAULT_PAD_TEXT:-""}
-            - SKIN_NAME=${ETHERPAD_SKIN_NAME:-colibris}
-            - SKIN_VARIANTS=${ETHERPAD_SKIN_VARIANTS:-"super-light-toolbar super-light-editor light-background full-width-editor"}
-            - SUPPRESS_ERRORS_IN_PAD_TEXT=true
-        networks:
-            meet.jitsi:
-                aliases:
-                    - etherpad.meet.jitsi
-EOF
-    warn "etherpad.yml не найден в релизе — создан официальный файл (stable-11248-3)"
-}
-
-_ensure_whiteboard_yml() {
-    [[ -f "$JITSI_DIR/whiteboard.yml" ]] && return 0
-    cat > "$JITSI_DIR/whiteboard.yml" <<'EOF'
-services:
-    whiteboard:
-        image: jitsi/excalidraw-backend:2026.3.0
-        restart: ${RESTART_POLICY:-unless-stopped}
-        depends_on:
-            - web
-        networks:
-            meet.jitsi:
-              aliases:
-                  - whiteboard.meet.jitsi
-EOF
-    warn "whiteboard.yml не найден в релизе — создан официальный файл (stable-11248-3)"
-}
-
-jitsi_etherpad_toggle() {
-    [[ -f "$JITSI_DIR/.env" ]] || { warn "сначала п.1 (установка)"; return 1; }
-    if [[ -n "$(jitsi_get_env ETHERPAD_URL_BASE)" ]]; then
-        ask_yn "Etherpad включён — отключить?" || return 0
-        ( cd "$JITSI_DIR" && sed -i '/^ETHERPAD_URL_BASE=/d;/^ETHERPAD_TITLE=/d' .env )
-        jitsi_dc rm -sf etherpad 2>/dev/null || true
-        jitsi_dc up -d
-        log "Etherpad отключён"
-    else
-        _ensure_etherpad_yml
-        local title; title="$(ask "Название Etherpad (TITLE)" "Wundergarden Etherpad")"
-        jitsi_set_env ETHERPAD_TITLE "$title"
-        jitsi_set_env ETHERPAD_URL_BASE "http://etherpad.meet.jitsi:9001"
-        jitsi_dc up -d
-        log "Etherpad включён: в конференции появится кнопка «Открыть совместный документ»"
-    fi
-    read -rp "Enter — продолжить " _ || true
-}
-
-jitsi_whiteboard_toggle() {
-    [[ -f "$JITSI_DIR/.env" ]] || { warn "сначала п.1 (установка)"; return 1; }
-    if [[ "$(jitsi_get_env WHITEBOARD_ENABLED)" =~ ^(1|true)$ ]]; then
-        ask_yn "Доска Excalidraw включена — отключить?" || return 0
-        ( cd "$JITSI_DIR" && sed -i '/^WHITEBOARD_ENABLED=/d;/^WHITEBOARD_COLLAB_SERVER_URL_BASE=/d;/^WHITEBOARD_COLLAB_SERVER_PUBLIC_URL=/d' .env )
-        jitsi_dc rm -sf whiteboard 2>/dev/null || true
-        jitsi_dc up -d
-        log "Доска Excalidraw отключена"
-    else
-        _ensure_whiteboard_yml
-        jitsi_set_env WHITEBOARD_ENABLED true
-        jitsi_set_env WHITEBOARD_COLLAB_SERVER_URL_BASE "http://whiteboard.meet.jitsi"
-        jitsi_dc up -d
-        log "Доска Excalidraw включена: в конференции появится кнопка «Открыть совместную доску»"
-    fi
-    read -rp "Enter — продолжить " _ || true
-}
 
 jitsi_token_server_running() {
     [[ -f "$JITSI_TOKEN_DIR/server.pid" ]] && kill -0 "$(cat "$JITSI_TOKEN_DIR/server.pid")" 2>/dev/null
@@ -620,9 +526,7 @@ jitsi_menu() {
         if [[ -d "$JITSI_DIR" ]]; then
             st="установлен"
             if jitsi_token_server_running; then
-                svc_st=" | token: вкл"
-            else
-                svc_st=" | token: выкл"
+                svc_st=" | token: active"
             fi
             if docker ps --format '{{.Names}}' 2>/dev/null | grep -qE 'jitsi|jicofo|jvb|prosody'; then
                 svc_st="${svc_st} | контейнеры: active"
@@ -634,10 +538,6 @@ jitsi_menu() {
             else
                 turn_st=" | coturn: общий"
             fi
-            local ep_st=" | etherpad: выкл" wb_st=" | доска: выкл"
-            [[ -n "$(jitsi_get_env ETHERPAD_URL_BASE)" ]] && ep_st=" | etherpad: вкл"
-            [[ "$(jitsi_get_env WHITEBOARD_ENABLED)" =~ ^(1|true)$ ]] && wb_st=" | доска: вкл"
-            svc_st="${svc_st}${ep_st}${wb_st}"
         fi
         cat <<SUM
 ${c_mag} --- Jitsi Meet ${st}${svc_st}${turn_st} ---${c_off}
@@ -650,8 +550,6 @@ ${c_mag} --- Jitsi Meet ${st}${svc_st}${turn_st} ---${c_off}
   ${c_num}7.${c_off} ${c_txt}Остановить token-сервер${c_off}
   ${c_num}8.${c_off} ${c_txt}Логи${c_off}
   ${c_num}9.${c_off} ${c_txt}Удалить${c_off}
- ${c_num}10.${c_off} ${c_txt}Etherpad: совместные документы (вкл/выкл)${c_off}
- ${c_num}11.${c_off} ${c_txt}Excalidraw: совместная доска (вкл/выкл)${c_off}
   ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
@@ -672,8 +570,6 @@ SUM
                 read -rp "Enter — продолжить " _ || true
                 ;;
             9) remove_jitsi ;;
-            10) jitsi_etherpad_toggle ;;
-            11) jitsi_whiteboard_toggle ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
         esac

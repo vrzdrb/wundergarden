@@ -6,12 +6,12 @@ gitea_running() {
     docker ps --format '{{.Names}}' 2>/dev/null | grep -qE 'gitea(-[0-9]+)?$'
 }
 
-# fallback если модуль загружен без 150-jitsi.sh (там определён свой rebuild_stream_map)
-command -v rebuild_stream_map >/dev/null 2>&1 || rebuild_stream_map() {
+# Собственная пересборка stream-мапы (автономно, без зависимостей от других модулей)
+gitea_rebuild_stream_map() {
     local lst="${STREAM_DOMAINS:-}"
     local map_file="$NGINX_CONFIG_DIR/stream.d/00-map.conf"
     {
-        echo "map \\$ssl_preread_server_name \\$stream_upstream {"
+        echo 'map $ssl_preread_server_name $stream_upstream {'
         local entry d p seen_ports=""
         if [[ -n "$lst" ]]; then
             IFS=','; for entry in $lst; do
@@ -208,6 +208,13 @@ SUM
 
     if docker compose -f "$COMPOSE_FILE" exec -T -u git gitea gitea admin user list 2>/dev/null | grep -q .; then
         log "Пользователи уже есть — создание админа пропущено."
+        # Восстанавливаем для показа данные, введённые ранее (переменные сбрасываются при повторном прогоне)
+        if [[ -z "$g_user" ]]; then
+            g_user="$(docker compose -f "$COMPOSE_FILE" exec -T -u git gitea gitea admin user list 2>/dev/null | awk 'NR>1 {print $2; exit}')"
+            [[ -z "$g_user" ]] && g_user="<список пользователей: docker compose -f $COMPOSE_FILE exec -T -u git gitea gitea admin user list>"
+        fi
+        [[ -z "$g_email" ]] && g_email="<задан при создании пользователя>"
+        [[ -z "$g_pass" ]] && g_pass="<задан при создании; скрипт его не хранит. Сброс: docker compose -f $COMPOSE_FILE exec -T -u git gitea gitea admin user change-password -u <логин> -p <новый_пароль>"
     else
         [[ -z "$g_user" ]] && g_user="$(ask "Логин первого админа" "admin")"
         [[ -z "$g_email" ]] && g_email="$(ask "Email админа" "admin@$DOMAIN")"
@@ -223,19 +230,19 @@ SUM
     fi
 
     # Stream passthrough: nginx:443 -> 127.0.0.1:<stream_port> (gitea или xray)
+    # Важно: синхронизируем .env и переменную сессии ДО пересборки мапы,
+    # иначе rebuild пройдёт по устаревшему значению STREAM_DOMAINS.
     local new_entry="${SUB}:${stream_port}"
-    if [[ -n "${STREAM_DOMAINS:-}" ]]; then
-        if [[ ",${STREAM_DOMAINS}," != *",${SUB}:"* ]]; then
-            update_env STREAM_DOMAINS "${STREAM_DOMAINS},${new_entry}"
-        else
-            local updated
-            updated="$(echo "$STREAM_DOMAINS" | sed "s|[^,]*${SUB}:[0-9]*|${new_entry}|g")"
-            update_env STREAM_DOMAINS "$updated"
-        fi
+    if [[ -n "${STREAM_DOMAINS:-}" && ",${STREAM_DOMAINS}," == *",${SUB}:"* ]]; then
+        STREAM_DOMAINS="$(echo "$STREAM_DOMAINS" | sed "s|[^,]*${SUB}:[0-9]*|${new_entry}|g")"
+    elif [[ -n "${STREAM_DOMAINS:-}" ]]; then
+        STREAM_DOMAINS="${STREAM_DOMAINS},${new_entry}"
     else
-        update_env STREAM_DOMAINS "$new_entry"
+        STREAM_DOMAINS="$new_entry"
     fi
-    rebuild_stream_map
+    update_env STREAM_DOMAINS "$STREAM_DOMAINS"
+    export STREAM_DOMAINS
+    gitea_rebuild_stream_map
     reload_nginx 2>/dev/null || warn "nginx не перезагрузился — проверьте: nginx -t && systemctl reload nginx"
     rm_site 140-gitea   # удаляем site-конфиг старой схемы (nginx-proxy), если был
 
@@ -263,17 +270,18 @@ SUM
 remove_gitea() {
     [[ -d "$DATA_DIR/gitea" ]] || { warn "Gitea не установлен"; read -rp "Enter — продолжить " _ || true; return 1; }
     ask_yn "Удалить Gitea? Контейнеры и настройки nginx будут удалены." || return 0
+    [[ -f "$ENV_FILE" ]] && load_env
 
     local SUB="${SUB_GITEA:-}"
     docker compose -f "$COMPOSE_FILE" stop gitea 2>/dev/null || true
     docker compose -f "$COMPOSE_FILE" rm -f gitea 2>/dev/null || true
 
     if [[ -n "$SUB" && -n "${STREAM_DOMAINS:-}" ]]; then
-        local updated
-        updated="$(echo "$STREAM_DOMAINS" | sed "s|[^,]*${SUB}:[0-9]*||g")"
-        updated="${updated#,}"; updated="${updated%,}"; updated="${updated//,,/,}"
-        update_env STREAM_DOMAINS "$updated"
-        rebuild_stream_map
+        STREAM_DOMAINS="$(echo "$STREAM_DOMAINS" | sed "s|[^,]*${SUB}:[0-9]*||g")"
+        STREAM_DOMAINS="${STREAM_DOMAINS#,}"; STREAM_DOMAINS="${STREAM_DOMAINS%,}"; STREAM_DOMAINS="${STREAM_DOMAINS//,,/,}"
+        update_env STREAM_DOMAINS "$STREAM_DOMAINS"
+        export STREAM_DOMAINS
+        gitea_rebuild_stream_map
         reload_nginx 2>/dev/null || true
     fi
 
