@@ -26,14 +26,19 @@ reload_nginx() {
 }
 
 install_nginx_host() {
-    if command -v nginx >/dev/null 2>&1 && systemctl is-active --quiet nginx; then
-        log "nginx уже установлен: $(nginx -v 2>&1)"
-        return 0
+    # Устанавливаем пакет только если бинарника ещё нет. Конфиг переписываем и
+    # nginx (пере)запускаем ВСЕГДА — даже если nginx уже активен. Причина:
+    # apt-get install nginx-full автозапускает nginx с дефолтным debian-конфигом
+    # (listen :80, без stream-блока, без listen 443). Прежний ранний возврат по
+    # is-active оставлял этот дефолтный конффиг висеть в работающем процессе, и
+    # 443 никогда не начинал слушаться.
+    if ! command -v nginx >/dev/null 2>&1; then
+        log "Устанавливаю nginx-full из репозитория Debian..."
+        apt-get update -qq
+        apt-get install -y -qq nginx-full
+    else
+        log "nginx binary уже установлен: $(nginx -v 2>&1)"
     fi
-
-    log "Устанавливаю nginx-full из репозитория Debian..."
-    apt-get update -qq
-    apt-get install -y -qq nginx-full
 
     # Проверяем наличие нужных модулей
     if nginx -V 2>&1 | grep -q 'with-stream'; then
@@ -160,15 +165,24 @@ NGXEOF
         log "UFW: порты 80/tcp и 443/tcp открыты"
     fi
 
-    # Тест конфига и запуск
+    # Тест конфига и запуск.
+    # ВАЖНО: apt-get install nginx-full в postinst автозапускает nginx с дефолтным
+    # debian-конфигом. systemctl enable --now nginx на уже активном сервисе —
+    # no-op (start не вызывается повторно, reload не вызывается), поэтому
+    # свежезаписанный wundergarden-конфиг со stream/listen 443 не загрузится в
+    # работающий процесс. Используем restart — он гарантированно перечитывает
+    # конфиг с диска. В ветке без сертификатов — stop, чтобы дефолтный сайт от
+    # apt не висел на :80, пока ssl_certificate ещё не валиден.
     if [[ -f "$NGINX_CONFIG_DIR/certs/fullchain.pem" && -f "$NGINX_CONFIG_DIR/certs/privkey.pem" ]]; then
         nginx -t 2>&1 || die "nginx: ошибка в конфигурации"
-        systemctl enable --now nginx
-        log "nginx установлен и запущен: $(nginx -v 2>&1)"
+        systemctl enable nginx
+        systemctl restart nginx
+        log "nginx установлен и запущен с конфигом wundergarden: $(nginx -v 2>&1)"
     else
-        warn "Сертификаты ещё не найдены в $NGINX_CONFIG_DIR/certs — nginx установлен, но не запущен."
-        warn "Сначала выпустите сертификаты (пункт 1), затем запустите nginx вручную или повторите установку."
-        nginx -t 2>&1 || warn "nginx: конфиг ещё не валиден до появления сертификатов"
+        warn "Сертификаты ещё не найдены в $NGINX_CONFIG_DIR/certs — nginx остановлен."
+        warn "Сначала выпустите сертификаты (пункт 1), затем повторите установку nginx (пункт 2)."
+        # apt auto-started nginx с дефолтным конфигом — останавливаем.
+        systemctl stop nginx 2>/dev/null || true
         systemctl enable nginx 2>/dev/null || true
     fi
 

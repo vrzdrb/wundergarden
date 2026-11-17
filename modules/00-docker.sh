@@ -591,13 +591,13 @@ services:
       - GITEA__database__NAME=gitea
       - GITEA__database__USER=gitea
       - GITEA__database__PASSWD=${GITEA_DB_PASSWORD}
-      # HTTPS терминирует сама gitea (stream passthrough через nginx:443)
-      - GITEA__server__PROTOCOL=https
+      # HTTP — TLS терминирует nginx на 127.0.0.1:8443 (REALITY fallback target).
+      # gitea не должна быть HTTPS: REALITY берёт ServerHello от target как шаблон
+      # для auth-ответа, и Go-TLS gitea ломает подмешивание. nginx-TLS на 8443 — OK.
+      - GITEA__server__PROTOCOL=http
       - GITEA__server__HTTP_PORT=3000
       - GITEA__server__DOMAIN=${SUB_GITEA}
       - GITEA__server__ROOT_URL=https://${SUB_GITEA}/
-      - GITEA__server__CERT_FILE=/data/certs/fullchain.pem
-      - GITEA__server__KEY_FILE=/data/certs/privkey.pem
       - GITEA__server__DISABLE_SSH=true
       - GITEA__server__LFS_START_SERVER=false
       - GITEA__service__DISABLE_REGISTRATION=true
@@ -612,7 +612,7 @@ services:
     ports:
       - "127.0.0.1:${GITEA_PORT:-3000}:3000"
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-check-certificate -qO- https://localhost:3000/ >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ >/dev/null 2>&1 || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5

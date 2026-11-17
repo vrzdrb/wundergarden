@@ -41,42 +41,10 @@ command -v rm_site >/dev/null 2>&1 || rm_site() {
     nginx -s reload 2>/dev/null || true
 }
 
-# Скрипт синхронизации сертификатов из nginx в каталог gitea (uid 1000).
-# Вызывается вручную из меню и по cron после продления acme.sh.
-gitea_certs_install() {
-    cat > "$GITEA_SYNC_SCRIPT" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-SRC="$CONFIG_ROOT/config/nginx/certs"
-DST="$DATA_DIR/gitea/certs"
-[[ -f "\$SRC/fullchain.pem" && -f "\$SRC/privkey.pem" ]] || exit 0
-mkdir -p "\$DST"
-changed=0
-for f in fullchain.pem privkey.pem; do
-    cmp -s "\$SRC/\$f" "\$DST/\$f" || { cp "\$SRC/\$f" "\$DST/\$f"; changed=1; }
-done
-chown 1000:1000 "\$DST/fullchain.pem" "\$DST/privkey.pem"
-chmod 644 "\$DST/fullchain.pem"
-chmod 600 "\$DST/privkey.pem"
-if [[ "\$changed" == "1" ]]; then
-    docker ps -q --filter name=gitea-1 | xargs -r docker restart >/dev/null 2>&1 || true
-fi
-EOF
-    chmod +x "$GITEA_SYNC_SCRIPT"
-}
-
-gitea_certs_sync() {
-    if [[ ! -x "$GITEA_SYNC_SCRIPT" ]]; then
-        gitea_certs_install
-    fi
-    if ! "$GITEA_SYNC_SCRIPT"; then
-        warn "Синхронизация сертификатов не удалась."
-        warn "Проверьте вручную: bash -x $GITEA_SYNC_SCRIPT"
-        warn "Источник: $CONFIG_ROOT/config/nginx/certs (нужны fullchain.pem и privkey.pem)"
-        return 1
-    fi
-    log "Сертификаты обновлены: $DATA_DIR/gitea/certs (владелец 1000:1000)"
-}
+# Сертификаты gitea больше не синхронизируются: gitea работает по HTTP, TLS
+# терминирует nginx на 127.0.0.1:8443 (REALITY fallback target). Переменная
+# GITEA_SYNC_SCRIPT оставлена только для очистки cron при remove_gitea
+# (защита от старых установок, где cert-sync ещё был).
 
 install_gitea() {
     ensure_prepared
@@ -115,13 +83,11 @@ SUM
                 fi
                 dns_hint "${sub}.${DOMAIN}" ;;
             2)
-                echo "${c_txt}Схема трафика: интернет → nginx:443 (stream passthrough, TLS НЕ терминируется nginx)${c_off}"
-                echo "${c_txt}→ 127.0.0.1:<порт> → gitea. HTTPS терминирует сама gitea — в интерфейсе не будет${c_off}"
-                echo "${c_txt}предупреждений об ошибках HTTPS.${c_off}"
-                echo "${c_txt}Промежуточный прокси (xray): слушает 127.0.0.1:<порт> и направляет трафик на${c_off}"
-                echo "${c_txt}порт gitea. TLS терминирует либо gitea, либо xray — тогда от xray к gitea${c_off}"
-                echo "${c_txt}тоже лучше HTTPS, иначе возможны ошибки смешанного контента.${c_off}"
-                port="$(ask "Порт gitea (только 127.0.0.1)" "$port")"
+                echo "${c_txt}Схема: nginx:443 (stream) → xray:<stream_port> (REALITY) → fallback на nginx:8443${c_off}"
+                echo "${c_txt}(HTTPS) → proxy_pass http://127.0.0.1:<порт> (gitea HTTP). TLS терминирует nginx${c_off}"
+                echo "${c_txt}на 8443, НЕ gitea — так REALITY использует nginx-TLS ServerHello как шаблон${c_off}"
+                echo "${c_txt}(Go-TLS gitea ломает подмешивание auth-ответа). ROOT_URL остаётся https://.${c_off}"
+                port="$(ask "Порт gitea HTTP (только 127.0.0.1)" "$port")"
                 if [[ ! "$port" =~ ^[0-9]+$ || "$port" -lt 1 || "$port" -gt 65535 ]]; then
                     warn "некорректный порт (1-65535)"
                     port="${GITEA_PORT:-3000}"
@@ -131,9 +97,11 @@ SUM
                     warn "порт $port уже занят — смотрите: ss -tlnp | grep :$port"
                 fi ;;
             3)
-                echo "${c_txt}nginx stream (443) направляет трафик этого домена на 127.0.0.1:<порт>.${c_off}"
-                echo "${c_txt}По умолчанию совпадает с портом gitea. Укажите другой, если между nginx и${c_off}"
-                echo "${c_txt}gitea будет xray: тогда здесь порт xray, а xray пересылает на порт gitea.${c_off}"
+                echo "${c_txt}nginx stream (443) направляет трафик этого домена на 127.0.0.1:<порт>${c_off}"
+                echo "${c_txt}— это порт xray REALITY. По умолчанию совпадает с портом gitea, но если${c_off}"
+                echo "${c_txt}между nginx и gitea стоит xray (рекомендуется), укажите порт xray.${c_off}"
+                echo "${c_txt}xray при провале REALITY-auth уходит в fallback на nginx:8443 (НЕ на gitea),${c_off}"
+                echo "${c_txt}а nginx:8443 proxy_pass на порт gitea HTTP.${c_off}"
                 stream_port="$(ask "Порт stream passthrough (Enter = $port)" "${stream_port:-$port}")"
                 [[ "$stream_port" =~ ^[0-9]+$ && "$stream_port" -ge 1 && "$stream_port" -le 65535 ]] \
                     || { warn "некорректный порт"; stream_port=""; } ;;
@@ -160,9 +128,10 @@ SUM
     update_env GITEA_STREAM_PORT "$stream_port"
     export SUB_GITEA="$SUB" GITEA_PORT="$port"
 
-    # Пересобираем docker-compose.yml, если в нём ещё HTTP-конфигурация gitea
-    if ! grep -q 'GITEA__server__PROTOCOL=https' "$COMPOSE_FILE" 2>/dev/null; then
-        log "Обновляю docker-compose.yml (HTTPS-конфигурация gitea)..."
+    # Пересобираем docker-compose.yml, если в нём ещё HTTPS-конфигурация gitea
+    # (старая схема, где gitea сама терминировала TLS).
+    if ! grep -q 'GITEA__server__PROTOCOL=http' "$COMPOSE_FILE" 2>/dev/null; then
+        log "Обновляю docker-compose.yml (HTTP-конфигурация gitea, TLS на nginx:8443)..."
         gen_compose || die "не удалось пересобрать $COMPOSE_FILE — проверьте права и повторите"
         warn "compose-файл пересобран; другие контейнеры не затронуты (пересоздаются только при up)."
     fi
@@ -175,9 +144,6 @@ SUM
     mkdir -p "$DATA_DIR/gitea" "$DATA_DIR/gitea-db"
     chown -R 1000:1000 "$DATA_DIR/gitea" 2>/dev/null || true
 
-    gitea_certs_install
-    gitea_certs_sync || warn "сертификаты не скопированы — gitea не поднимется по HTTPS"
-
     docker compose -f "$COMPOSE_FILE" up -d gitea-db \
         || die "gitea-db не запустилась. Логи: docker compose -f $COMPOSE_FILE logs --tail 100 gitea-db
 Типичные причины: нет места на диске (df -h), не задан GITEA_DB_PASSWORD, занят порт postgres."
@@ -189,19 +155,17 @@ SUM
         || die "контейнер gitea не запустился. Логи: docker compose -f $COMPOSE_FILE logs --tail 100 gitea gitea-db
 Типичные причины:
   - порт $port занят: ss -tlnp | grep :$port
-  - нет/не читаются сертификаты: $DATA_DIR/gitea/certs (владелец должен быть 1000:1000)
   - нет прав на запись в $DATA_DIR/gitea"
 
-    log "Жду готовности Gitea (https://127.0.0.1:$port)..."
+    log "Жду готовности Gitea (http://127.0.0.1:$port)..."
     local tries=0 ready=0
     while [[ $tries -lt 30 ]]; do
-        if curl -sk -o /dev/null --max-time 3 "https://127.0.0.1:${port}/"; then ready=1; break; fi
+        if curl -s -o /dev/null --max-time 3 "http://127.0.0.1:${port}/"; then ready=1; break; fi
         sleep 2; tries=$((tries + 1))
     done
     if [[ "$ready" != "1" ]]; then
-        die "Gitea не отвечает по https://127.0.0.1:$port за 60 с. Логи: docker compose -f $COMPOSE_FILE logs --tail 100 gitea
+        die "Gitea не отвечает по http://127.0.0.1:$port за 60 с. Логи: docker compose -f $COMPOSE_FILE logs --tail 100 gitea
 Проверьте:
-  - сертификаты: ls -l $DATA_DIR/gitea/certs (владелец 1000:1000, privkey 600)
   - занятость порта: ss -tlnp | grep :$port
   - статус контейнера: docker ps -a | grep gitea"
     fi
@@ -243,11 +207,23 @@ SUM
     update_env STREAM_DOMAINS "$STREAM_DOMAINS"
     export STREAM_DOMAINS
     gitea_rebuild_stream_map
-    reload_nginx 2>/dev/null || warn "nginx не перезагрузился — проверьте: nginx -t && systemctl reload nginx"
-    rm_site 140-gitea   # удаляем site-конфиг старой схемы (nginx-proxy), если был
-
-    install_cron_entry "23 4 * * 1" "$GITEA_SYNC_SCRIPT"
-    log "Синхронизация сертификатов добавлена в cron (пн, 04:23): $GITEA_SYNC_SCRIPT"
+    # nginx reverse-proxy на 127.0.0.1:8443: терминирует TLS и proxy_pass на gitea HTTP.
+    # Это REALITY fallback target — xray:<stream_port> при провале auth уходит сюда,
+    # nginx отвечает валидным TLS (nginx-TLS, не Go-TLS gitea), и REALITY-клиент
+    # получает корректный ServerHello-шаблон. add_site сам вызывает reload_nginx,
+    # который подхватывает и свежую stream-мапу, и этот site-конфиг.
+    add_site 140-gitea "server {
+    listen 127.0.0.1:8443 ssl;
+    server_name $SUB;
+    ssl_certificate     $CONFIG_ROOT/config/nginx/certs/fullchain.pem;
+    ssl_certificate_key $CONFIG_ROOT/config/nginx/certs/privkey.pem;
+    client_max_body_size 0;
+    location / {
+        proxy_pass http://127.0.0.1:${port};
+        include $CONFIG_ROOT/config/nginx/proxy_common.conf;
+        include $CONFIG_ROOT/config/nginx/ws_common.conf;
+    }
+}"
 
     show_connection_info "Gitea" \
         "URL: https://$SUB" \
@@ -255,8 +231,9 @@ SUM
         "Email: $g_email" \
         "Пароль: $g_pass" \
         "" \
-        "Gitea слушает: 127.0.0.1:$port (HTTPS)" \
-        "Stream passthrough: nginx:443 -> 127.0.0.1:$stream_port" \
+        "Gitea слушает: 127.0.0.1:$port (HTTP)" \
+        "Stream: nginx:443 → 127.0.0.1:$stream_port (xray REALITY)" \
+        "REALITY fallback: 127.0.0.1:8443 (nginx HTTPS) → 127.0.0.1:$port (gitea HTTP)" \
         "Регистрация закрыта, SSH/LFS/OpenID выключены" \
         "Данные: $DATA_DIR/gitea + $DATA_DIR/gitea-db"
 
@@ -315,8 +292,7 @@ gitea_menu() {
 ${c_mag} --- Gitea | статус: ${st} ---${c_off}
   ${c_num}1.${c_off} ${c_txt}Установка / переустановка${c_off}
   ${c_num}2.${c_off} ${c_txt}Логи контейнеров (последние 100 строк)${c_off}
-  ${c_num}3.${c_off} ${c_txt}Обновить сертификаты (копия в контейнер)${c_off}
-  ${c_num}4.${c_off} ${c_txt}Удалить${c_off}
+  ${c_num}3.${c_off} ${c_txt}Удалить${c_off}
   ${c_num}0.${c_off} ${c_txt}Назад${c_off}
 SUM
         read -rp "$(_t PROMPT_SETTINGS)" c || true
@@ -326,8 +302,7 @@ SUM
                 docker compose -f "$COMPOSE_FILE" logs --tail 100 gitea gitea-db 2>/dev/null \
                     || warn "не удалось получить логи: docker compose -f $COMPOSE_FILE logs gitea gitea-db"
                 read -rp "Enter — продолжить " _ || true ;;
-            3) gitea_certs_sync; read -rp "Enter — продолжить " _ || true ;;
-            4) remove_gitea ;;
+            3) remove_gitea ;;
             0) return 0 ;;
             *) warn "нет такого пункта" ;;
         esac
